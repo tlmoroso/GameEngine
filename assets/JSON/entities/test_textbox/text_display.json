@@ -1,0 +1,16 @@
+{
+  "loadable_type": "text_display",
+  "other_value": {
+    "content": ["TEST TEXTBOX"],
+    "position_x": 100,
+    "position_y": 100,
+    "bounds_x": 500,
+    "bounds_y": 300,
+    "size": 75,
+    "r": 1,
+    "g": 1,
+    "b": 1,
+    "a": 1,
+    "font": "title_font"
+  }
+}

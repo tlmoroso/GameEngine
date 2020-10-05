@@ -1,0 +1,7 @@
+{
+  "loadable_type": "entity",
+  "other_value": [
+    "assets/JSON/entities/test_textbox/mesh_graphic.json",
+    "assets/JSON/entities/test_textbox/text_display.json"
+  ]
+}

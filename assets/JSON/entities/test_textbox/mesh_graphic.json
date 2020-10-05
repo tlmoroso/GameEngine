@@ -1,0 +1,14 @@
+{
+  "loadable_type": "mesh_graphic",
+  "other_value": {
+    "x": 100,
+    "y": 100,
+    "width": 500,
+    "height": 300,
+    "r": 1,
+    "g": 1,
+    "b": 1,
+    "a": 1,
+    "stroke_width": 1
+  }
+}

@@ -1,0 +1,15 @@
+[package]
+name = "game_engine"
+version = "0.1.0"
+authors = ["Tyler Moroso <tlmoroso@mit.edu>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+coffee = {version = "0.4", features = ["opengl"]}
+specs = {version = "0.16.1"}
+serde = {version = "1.0"}
+serde_json = {version = "1.0"}
+typetag = "0.1.6"
+lazy_static = "1.4.0"
