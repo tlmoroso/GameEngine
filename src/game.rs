@@ -1,83 +1,62 @@
-use crate::scenes::{SceneStack, SCENE_STACK_FILE_ID};
-use crate::input::CustomInput;
-use crate::components::{player_control::PlayerControl, position::Position, text_display::TextDisplay, mesh_graphic::MeshGraphic, animation::Animation};
-
 use coffee::graphics::{Color, Frame, Window};
-use coffee::load::Task;
+use coffee::load::{Task, Join, LoadingScreen};
+use coffee::input::Input;
 use coffee::{Game, Timer};
 
-use specs::World;
+use specs::{World};
 use specs::WorldExt;
-use crate::load::{JSON_FILE, LOAD_PATH, load_json};
-use std::sync::{Arc, RwLock};
-use crate::globals::{FontDict, FONT_DICT_FILE_ID};
 
-pub struct MyGame {
-    scene_stack: SceneStack,
-    ecs: Arc<RwLock<World>>,
-}
+use crate::scenes::scene_stack::SceneStack;
+use std::marker::PhantomData;
 
-impl MyGame {
-    fn register_components(ecs: &mut World) {
-        ecs.register::<Position>();
-        ecs.register::<PlayerControl>();
-        ecs.register::<TextDisplay>();
-        ecs.register::<MeshGraphic>();
-        ecs.register::<Animation>();
+pub const GAME_FILE_ID: &str = "game";
+
+pub trait GameWrapper<T: Input>: Game {
+    // Allow user to pre-fill World with global values here
+    fn load_world(_window: &Window) -> Task<World> {
+        return Task::new(|| {Ok(World::new())})
     }
+
+    fn load_scene_stack(window: &Window) -> Task<SceneStack<T>>;
 }
 
-impl MyGame {
-    pub fn load_game(&mut self, window: &mut Window) {
-        let font_dict_json_value = load_json([LOAD_PATH, FONT_DICT_FILE_ID, JSON_FILE].join(""));
-        if font_dict_json_value.loadable_type.eq(FONT_DICT_FILE_ID) {
-            let font_dict = FontDict::load(self.ecs.clone(), Arc::new(RwLock::new(window)), font_dict_json_value.other_value)
-                .run(window.gpu()).unwrap();
-            self.ecs
-                .write()
-                .expect("ERROR: RwLock poisoned for ecs in Game::interact")
-                .insert::<FontDict>(font_dict);
-        } else { panic!(format!("ERROR: font_dict_json_value == {} instead of {}", font_dict_json_value.loadable_type, FONT_DICT_FILE_ID)); }
-
-        let scene_stack_json_value = load_json([LOAD_PATH, SCENE_STACK_FILE_ID, JSON_FILE].join(""));
-        if scene_stack_json_value.loadable_type.eq(SCENE_STACK_FILE_ID) {
-            self.scene_stack = SceneStack::load(self.ecs.clone(), Arc::new(RwLock::new(window)), scene_stack_json_value.other_value)
-                .run(window.gpu()).unwrap()
-        } else { panic!(format!("ERROR: scene_stack_json_value == {} instead of {}", scene_stack_json_value.loadable_type, SCENE_STACK_FILE_ID)); }
-
-    }
+struct MyGame<T: GameWrapper<U>, U: Input, V: LoadingScreen> {
+    scene_stack: SceneStack<U>,
+    ecs: World,
+    phantom_wrapper: PhantomData<T>,
+    phantom_loading_screen: PhantomData<V>,
 }
 
-impl Game for MyGame {
-    type Input = CustomInput;
-    type LoadingScreen = ();
+impl<T: GameWrapper<U>, U: 'static + Input, V: LoadingScreen> Game for MyGame<T,U,V> {
+    type Input = U;
+    type LoadingScreen = V;
 
-    fn load(window: &Window) -> Task<MyGame> {
-        let mut world = World::new();
-        MyGame::register_components(&mut world);
-
-        let scene_stack = SceneStack{stack: vec![], loaded: false };
-
-        Task::succeed(|| MyGame {
-            scene_stack,
-            ecs: Arc::new(RwLock::new(world)),
-        })
+    fn load(window: &Window) -> Task<MyGame<T,U,V>> {
+        (
+            T::load_world(window),
+            T::load_scene_stack(window),
+        )
+            .join()
+            .map(|(ecs, scene_stack)| {
+                MyGame {
+                    scene_stack,
+                    ecs,
+                    phantom_wrapper: PhantomData,
+                    phantom_loading_screen: PhantomData
+                }
+            })
     }
 
     fn draw(&mut self, frame: &mut Frame, timer: &Timer) {
         frame.clear(Color::BLACK);
-        self.scene_stack.draw(self.ecs.clone(), frame, timer);
+        self.scene_stack.draw(&mut self.ecs, frame, timer);
     }
 
     fn interact(&mut self, input: &mut Self::Input, window: &mut Window) {
-        if self.scene_stack.loaded {
-            self.scene_stack.interact(self.ecs.clone(), input, Arc::new(RwLock::new(window)));
-        } else {
-            self.load_game(window);
-        }
+        self.scene_stack.interact(&mut self.ecs, input, window);
     }
 
     fn update(&mut self, _window: &Window) {
-        self.scene_stack.update(self.ecs.clone());
+        self.scene_stack.update(&mut self.ecs);
     }
 }

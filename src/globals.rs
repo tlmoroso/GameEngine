@@ -1,11 +1,16 @@
 use std::collections::{HashMap};
+use std::fs;
+use std::io::ErrorKind;
+
+use crate::load::{load_json};
+
 use coffee::graphics::{Image, Font, Window};
-use crate::load::Loadable;
-use specs::World;
-use coffee::load::Task;
-use std::fs::{read};
-use std::sync::{RwLock, Arc};
-use serde_json::{Value, from_value};
+use coffee::load::{Task, Join};
+use coffee::Error;
+
+use specs::{World};
+
+use serde_json::{Value};
 use serde::Deserialize;
 
 pub const FONT_DICT_FILE_ID: &str = "font_dict";
@@ -14,54 +19,75 @@ pub const FONT_DICT_FILE_ID: &str = "font_dict";
 struct FontMapJSON(HashMap<String, String>);
 
 pub struct ImageDict(pub(crate) HashMap<String, Image>);
-pub struct FontDict(pub(crate) Arc<RwLock<HashMap<String, Font>>>);
+pub struct FontDict(pub(crate) HashMap<String, Font>);
 
-pub const FONTS_FILE_ID: &str = "fonts";
+pub const FONTS_DIR: &str = "fonts/";
 
-pub const TITLE_FONT: &str = "title_font";
-static mut TITLE_FONT_DATA: Vec<u8> = Vec::new();
+const FONT_VEC_SIZE: usize = 4;
+const FONT_FILE_SIZE: usize = 60_000;
+static mut FONT_BYTES: [[u8; FONT_FILE_SIZE]; FONT_VEC_SIZE] = [[0; FONT_FILE_SIZE]; FONT_VEC_SIZE];
 
 unsafe impl Send for FontDict {}
-
 unsafe impl Sync for FontDict {}
 
-impl Loadable for FontDict {}
+#[derive(Deserialize)]
+pub struct FontDictLoader {
+    path: String
+}
 
-impl FontDict {
-    pub fn load(_ecs: Arc<RwLock<World>>, window: Arc<RwLock<&mut Window>>, json_value: Value) -> Task<Self> {
-        let mut window_mut = window
-            .write()
-            .expect("ERROR: RwLock poisoned for window in FontDict::load");
+impl FontDictLoader {
+    pub fn new(file_path: String) -> Self {
+        Self {
+            path: file_path
+        }
+    }
 
-        let font_map_json: FontMapJSON = from_value(json_value)
-            .expect("ERROR: could not translate json value into font_map in FontDict::load");
-        let mut font_dict = HashMap::new();
-        for (font_name, font_path) in font_map_json.0 {
-            let mut loaded_font: Font;
-            unsafe {
-                loaded_font = match font_name.as_str() {
-                    TITLE_FONT => {
-                        TITLE_FONT_DATA = read(font_path.clone())
-                            .expect(format!("ERROR: could not load file into string in FontDict::load: font_path = {}", font_path).as_str());
-                        Font::from_bytes(window_mut.gpu(), TITLE_FONT_DATA.as_slice())
-                            .expect("ERROR: could not load font from font data in FontDict::load")
-                    },
-                    _ => panic!(format!("ERROR: font name did not match any fonts: {}", font_name))
+    fn load(self, _ecs: &mut World, _window: &Window) -> Task<FontDict> {
+        let mut font_task = Task::new(|| { Ok(
+            HashMap::new()
+        )});
+
+        let json_value = load_json(&self.path).unwrap();
+        return if let Value::Object(loadable_fonts) = json_value.actual_value {
+            for (index, (font_name, font_path)) in loadable_fonts.into_iter().enumerate() {
+                if let Value::String(font_path) = font_path {
+                    let font_name= font_name.clone();
+                    let font_path = font_path.clone();
+
+                    let font = fs::read(font_path).unwrap();
+                    if font.len() <= FONT_VEC_SIZE {
+                        unsafe {
+                            font.iter().enumerate().map(|(i, byte)| { FONT_BYTES[index][i] = *byte } )
+                        };
+                    }
+
+
+                    font_task = (
+                        Font::load_from_bytes(unsafe { &FONT_BYTES[index] }),
+                        font_task
+                    )
+                        .join()
+                        .map(|(font, mut font_dict)| {
+                            font_dict.insert(font_name, font);
+                            return font_dict
+                        })
+                } else {
+                    return Task::new(move || {
+                        coffee::Result::Err(
+                            Error::IO(std::io::Error::new(ErrorKind::InvalidData, format!("Incorrect JSON Value: Expected Value::String, Got {:?}", font_path)))
+                        )
+                    })
                 }
             }
-
-            match font_name.as_str() {
-                TITLE_FONT => font_dict.insert(TITLE_FONT.to_string(), loaded_font),
-                _ => panic!(format!("ERROR: font name did not match any valid names: {}", font_name)),
-            };
-        }
-
-        Task::new( || {
-            Ok(
-                FontDict(
-                    Arc::new(RwLock::new(font_dict))
+            font_task.map(|font_dict| {
+                FontDict(font_dict)
+            })
+        } else {
+            Task::new(move || {
+                coffee::Result::Err(
+                    Error::IO(std::io::Error::new(ErrorKind::InvalidData, format!("Incorrect JSON Value: Expected Value::Object<Map<String, String>>, Got {:?}", json_value)))
                 )
-            )
-        })
+            })
+        }
     }
 }

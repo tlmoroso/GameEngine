@@ -1,22 +1,16 @@
-use crate::components::animation::Animation;
-use crate::components::mesh_graphic::MeshGraphic;
-use crate::components::player_control::PlayerControl;
-use crate::components::position::Position;
-use crate::components::text_display::TextDisplay;
+use specs::{World, EntityBuilder};
 
-pub mod player_control;
-pub mod position;
-pub mod text_display;
-pub mod mesh_graphic;
-pub mod animation;
+use coffee::graphics::Window;
+use coffee::load::Task;
 
-pub const COMPONENTS_LOAD_PATH: &str = "components";
+use serde_json::Value;
 
-#[derive(Debug)]
-pub enum ComponentType {
-    Animation(Animation),
-    MeshGraphic(MeshGraphic),
-    PlayerControl(PlayerControl),
-    Position(Position),
-    TextDisplay(TextDisplay),
+pub const COMPONENTS_DIR: &str = "components/";
+
+pub trait ComponentLoader {
+    fn load_component(&self, json_value: Value, entity_task: Task<EntityBuilder>, ecs: &mut World, window: &Window) -> Task<EntityBuilder>;
+}
+
+pub trait ComponentMux {
+    fn map_id_to_loader(component_id: String) -> Box<dyn ComponentLoader>;
 }
