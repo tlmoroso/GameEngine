@@ -1,11 +1,9 @@
 #[macro_use]
-extern crate lazy_static;
-
-mod entities;
-mod components;
-mod systems;
-mod scenes;
-mod game;
-mod input;
-mod load;
-mod globals;
+pub mod load;
+pub mod entities;
+pub mod components;
+pub mod systems;
+pub mod scenes;
+pub mod game;
+pub mod input;
+pub mod globals;

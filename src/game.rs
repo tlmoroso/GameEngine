@@ -7,7 +7,12 @@ use specs::{World};
 use specs::WorldExt;
 
 use crate::scenes::scene_stack::SceneStack;
+
 use std::marker::PhantomData;
+use std::sync::{RwLock, Arc};
+
+use thiserror::Error;
+use crate::game::GameError::{GameDrawError, GameInteractError, GameUpdateError};
 
 pub const GAME_FILE_ID: &str = "game";
 
@@ -22,7 +27,7 @@ pub trait GameWrapper<T: Input>: Game {
 
 struct MyGame<T: GameWrapper<U>, U: Input, V: LoadingScreen> {
     scene_stack: SceneStack<U>,
-    ecs: World,
+    ecs: Arc<RwLock<World>>,
     phantom_wrapper: PhantomData<T>,
     phantom_loading_screen: PhantomData<V>,
 }
@@ -40,7 +45,7 @@ impl<T: GameWrapper<U>, U: 'static + Input, V: LoadingScreen> Game for MyGame<T,
             .map(|(ecs, scene_stack)| {
                 MyGame {
                     scene_stack,
-                    ecs,
+                    ecs: Arc::new(RwLock::new(ecs)),
                     phantom_wrapper: PhantomData,
                     phantom_loading_screen: PhantomData
                 }
@@ -49,14 +54,33 @@ impl<T: GameWrapper<U>, U: 'static + Input, V: LoadingScreen> Game for MyGame<T,
 
     fn draw(&mut self, frame: &mut Frame, timer: &Timer) {
         frame.clear(Color::BLACK);
-        self.scene_stack.draw(&mut self.ecs, frame, timer);
+        let result = self.scene_stack.draw(self.ecs.clone(), frame, timer);
+        if let Err(e) = result {
+            panic!(GameDrawError { source: e })
+        }
     }
 
     fn interact(&mut self, input: &mut Self::Input, window: &mut Window) {
-        self.scene_stack.interact(&mut self.ecs, input, window);
+        let result = self.scene_stack.interact(self.ecs.clone(), input, window);
+        if let Err(e) = result {
+            panic!(GameInteractError { source: e })
+        }
     }
 
     fn update(&mut self, _window: &Window) {
-        self.scene_stack.update(&mut self.ecs);
+        let result = self.scene_stack.update(self.ecs.clone());
+        if let Err(e) = result {
+            panic!(GameUpdateError { source: e })
+        }
     }
+}
+
+#[derive(Error, Debug)]
+pub enum GameError {
+    #[error("Error during draw")]
+    GameDrawError { source: anyhow::Error },
+    #[error("Error during interact")]
+    GameInteractError { source: anyhow::Error },
+    #[error("Error during update")]
+    GameUpdateError { source: anyhow::Error }
 }

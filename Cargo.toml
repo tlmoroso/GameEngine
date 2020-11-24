@@ -5,7 +5,7 @@ authors = ["Tyler Moroso <tlmoroso@mit.edu>"]
 edition = "2018"
 
 [lib]
-name = "GameEngine"
+name = "game_engine"
 path = "src/lib.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -15,5 +15,5 @@ coffee = {version = "0.4", features = ["opengl"]}
 specs = {version = "0.16.1"}
 serde = {version = "1.0", features = ["derive"]}
 serde_json = {version = "1.0"}
-lazy_static = "1.4.0"
 thiserror = "1.0.22"
+anyhow = "1.0.34"

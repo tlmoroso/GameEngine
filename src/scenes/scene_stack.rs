@@ -1,5 +1,7 @@
 use crate::scenes::{Scene, SceneLoader};
-use crate::load::{load_json, JSONLoad};
+use crate::scenes::scene_stack::SceneStackError::{SceneStackFileLoadError, SceneStackJSONLoadError, SceneStackEmptyError};
+use crate::load::{load_json, JSONLoad, LoadError, build_task_error};
+use crate::load::LoadError::{LoadIDError};
 
 use specs::{World};
 
@@ -10,8 +12,16 @@ use coffee::input::Input;
 
 use std::io::ErrorKind;
 use std::marker::PhantomData;
+use std::sync::{Arc, RwLock};
 
-use serde_json::Value;
+use serde_json::{Value, from_value};
+use serde::Deserialize;
+
+use thiserror::Error;
+
+use anyhow::Result;
+
+pub const SCENE_STACK_FILE_ID: &str = "scene_stack";
 
 pub enum SceneTransition<T: Input> {
     POP(u8),
@@ -26,6 +36,11 @@ pub struct SceneStackLoader<T: 'static + Input> {
     scene_factory: fn(JSONLoad) -> Box<dyn SceneLoader<T>>
 }
 
+#[derive(Deserialize)]
+struct SceneStackLoaderJSON {
+    scenes: Vec<String>
+}
+
 impl<T: 'static + Input> SceneStackLoader<T> {
     pub fn new(file_path: String, scene_factory: fn(JSONLoad) -> Box<dyn SceneLoader<T>>) -> Self {
         Self {
@@ -34,44 +49,76 @@ impl<T: 'static + Input> SceneStackLoader<T> {
         }
     }
 
-    pub fn load(self, ecs: &mut World, window: &Window) -> Task<SceneStack<T>> {
-        let json_value = load_json(&self.scene_stack_file).unwrap();
-        return if let Value::Array(scene_paths) = json_value.actual_value {
-            let mut scene_task = Task::new(|| {Ok(
-                Vec::new()
-            )});
+    pub fn load(self, ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>> {
+        let json_value = map_err_return!(
+            load_json(&self.scene_stack_file),
+            |e| { build_task_error(
+                SceneStackFileLoadError {
+                    path: self.scene_stack_file,
+                    var_name: stringify!(self.scene_stack_file).to_string(),
+                    source: e
+                },
+                ErrorKind::InvalidData
+            )}
+        );
 
-            for scene_path in scene_paths {
-                if let Value::String(scene_path) = scene_path {
-                    let scene_value = load_json(&scene_path).unwrap();
-                    let scene_loader = (self.scene_factory)(scene_value);
-                    scene_task = (
-                        scene_loader.load_scene(ecs, window),
-                        scene_task
-                    )
-                        .join()
-                        .map(|(scene, mut scene_vec)| {
-                            scene_vec.push(scene);
-                            return scene_vec
-                        })
-                } else {
-                    return Task::new(|| { Err(
-                        coffee::Error::IO(std::io::Error::new(ErrorKind::InvalidData, "ERROR: expected string describing scene path"))
-                    )})
-                }
-            }
-
-            scene_task.map(|scene_vec| {
-                SceneStack {
-                    stack: scene_vec,
-                    phantom_input: PhantomData
-                }
-            })
-        } else {
-            return Task::new(|| { Err(
-                coffee::Error::IO(std::io::Error::new(ErrorKind::InvalidData, "ERROR: expected Array of path strings"))
-            )})
+        if json_value.load_type_id != SCENE_STACK_FILE_ID {
+            return build_task_error(
+                LoadIDError {
+                    actual: json_value.load_type_id,
+                    expected: SCENE_STACK_FILE_ID.to_string(),
+                    json_path: self.scene_stack_file.clone()
+                },
+                ErrorKind::InvalidData
+            )
         }
+
+        let scene_paths: SceneStackLoaderJSON = map_err_return!(
+            from_value(json_value.actual_value.clone()),
+            |e| { build_task_error(
+                SceneStackJSONLoadError {
+                    value: json_value.actual_value,
+                    source: e
+                },
+                ErrorKind::InvalidData
+            )}
+        );
+
+        let mut scene_task = Task::new(|| {Ok(
+            Vec::new()
+        )});
+
+        for scene_path in scene_paths.scenes {
+            let scene_value = map_err_return!(
+                load_json(&scene_path),
+                |e| { build_task_error(
+                    SceneStackFileLoadError {
+                        path: "".to_string(),
+                        var_name: stringify!(scene_path).to_string(),
+                        source: e
+                    },
+                    ErrorKind::InvalidData
+                )}
+            );
+
+            let scene_loader = (self.scene_factory)(scene_value);
+            scene_task = (
+                scene_loader.load_scene(ecs.clone(), window),
+                scene_task
+            )
+                .join()
+                .map(|(scene, mut scene_vec)| {
+                    scene_vec.push(scene);
+                    return scene_vec
+                })
+        }
+
+        scene_task.map(|scene_vec| {
+            SceneStack {
+                stack: scene_vec,
+                phantom_input: PhantomData
+            }
+        })
     }
 }
 
@@ -81,14 +128,13 @@ pub struct SceneStack<T: Input> {
 }
 
 impl<T: Input> SceneStack<T> {
-    pub fn update(&mut self, ecs: &mut World) {
+    pub fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<()> {
         let transition: SceneTransition<T>;
 
         if let Some(scene) = self.stack.last_mut() {
-            transition = scene.update(ecs);
+            transition = scene.update(ecs)?;
         } else {
-            println!("ERROR: scene stack is empty");
-            panic!();
+            return anyhow::Result::Err(anyhow::Error::new(SceneStackEmptyError {}))
         }
 
         match transition {
@@ -97,22 +143,45 @@ impl<T: Input> SceneStack<T> {
             SceneTransition::SWAP(_new_scene) => {},
             SceneTransition::CLEAR => {},
             _ => {}
-        }
+        };
+
+        return anyhow::Result::Ok(())
     }
 
-    pub fn draw(&mut self, ecs: &mut World, frame: &mut Frame, timer: &Timer) {
+    pub fn draw(&mut self, ecs: Arc<RwLock<World>>, frame: &mut Frame, timer: &Timer) -> Result<()> {
         if let Some(scene) = self.stack.last_mut() {
-            scene.draw(ecs, frame, timer);
+            scene.draw(ecs, frame, timer)?;
         } else {
-            println!("ERROR: scene stack is empty");
+            return Result::Err(anyhow::Error::new(SceneStackEmptyError {}))
         }
+
+        return Result::Ok(())
     }
 
-    pub fn interact(&mut self, ecs: &mut World, input: &mut T, window: &mut Window) {
+    pub fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &mut T, window: &mut Window) -> Result<()> {
         if let Some(scene) = self.stack.last_mut() {
-            scene.interact(ecs, input, window);
+            scene.interact(ecs, input, window)?;
         } else {
-            println!("ERROR: scene stack is empty");
+            return Result::Err(anyhow::Error::new(SceneStackEmptyError {}))
         }
+
+        return Result::Ok(())
     }
+}
+
+#[derive(Error, Debug)]
+pub enum SceneStackError {
+    #[error("Error loading JSON Value for SceneStackLoader from: {var_name} = {path}")]
+    SceneStackFileLoadError {
+        path: String,
+        var_name: String,
+        source: LoadError
+    },
+    #[error("Error converting serde_json::value::Value into SceneStackLoaderJSON.\nExpected: Value::Array<Value::String>\nActual: {value}")]
+    SceneStackJSONLoadError {
+        value: Value,
+        source: serde_json::error::Error
+    },
+    #[error("Error getting scene from stack. SceneStack is empty.")]
+    SceneStackEmptyError {}
 }
