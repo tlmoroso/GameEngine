@@ -16,12 +16,11 @@ use serde::Deserialize;
 
 use thiserror::Error;
 
-#[cfg(trace)]
-use tracing::{instrument, trace};
+#[cfg(feature="trace")]
+use tracing::{instrument, trace, error};
 
 pub const FONT_DICT_FILE_ID: &str = "font_dict";
 
-// pub struct ImageDict(pub(crate) HashMap<String, Image>);
 pub struct FontDict(pub(crate) HashMap<String, Font>);
 
 pub const FONTS_DIR: &str = "fonts/";
@@ -44,22 +43,22 @@ struct FontDictLoaderJSON {
 }
 
 impl FontDictLoader {
-    #[cfg_attr(trace, instrument)]
+    #[cfg_attr(feature="trace", instrument)]
     pub fn new(file_path: String) -> Self {
-        #[cfg(trace)]
-trace!("ENTER: FontDictLoader::new");
+        #[cfg(feature="trace")]
+        trace!("ENTER: FontDictLoader::new");
         let new = Self {
             path: file_path
         };
-        #[cfg(trace)]
-trace!("EXIT: FontDictLoader::new");
+        #[cfg(feature="trace")]
+        trace!("EXIT: FontDictLoader::new");
         return new
     }
 
-    #[cfg_attr(trace, instrument(skip(self, _ecs, _window)))]
+    #[cfg_attr(feature="trace", instrument(skip(self, _ecs, _window)))]
     pub fn load(self, _ecs: Arc<RwLock<World>>, _window: &Window) -> Task<FontDict> {
-        #[cfg(trace)]
-trace!("ENTER: FontDictLoader::load");
+        #[cfg(feature="trace")]
+        trace!("ENTER: FontDictLoader::load");
         let mut font_task = Task::new(|| { Ok(
             HashMap::new()
         )});
@@ -75,8 +74,8 @@ trace!("ENTER: FontDictLoader::load");
                 ErrorKind::InvalidData
             )}
         );
-        #[cfg(trace)]
-trace!("Value: {} successfully loaded from: {}", json_value, self.path);
+        #[cfg(feature="trace")]
+        trace!("{}", format!("Value: {:#?} successfully loaded from: {:#?}", json_value, self.path));
 
         if json_value.load_type_id == FONT_DICT_FILE_ID {
             return build_task_error(
@@ -88,8 +87,8 @@ trace!("Value: {} successfully loaded from: {}", json_value, self.path);
                 ErrorKind::InvalidData
             )
         }
-        #[cfg(trace)]
-trace!("Value type ID: {} correctly matches FONT_DICT_FILE_ID", json_value.load_type_id.clone());
+        #[cfg(feature="trace")]
+        trace!("{}", format!("Value type ID: {} correctly matches FONT_DICT_FILE_ID", json_value.load_type_id.clone()));
 
         let fonts: FontDictLoaderJSON = map_err_return!(
             from_value(json_value.actual_value.clone()),
@@ -101,8 +100,8 @@ trace!("Value type ID: {} correctly matches FONT_DICT_FILE_ID", json_value.load_
                 ErrorKind::InvalidData
             )}
         );
-        #[cfg(trace)]
-trace!("Value: {} successfully transformed into FontDictLoaderJSON", json_value.actual_value.clone());
+        #[cfg(feature="trace")]
+        trace!("{}", format!("Value: {} successfully transformed into FontDictLoaderJSON", json_value.actual_value.clone()));
 
         for (index, (font_name, font_path)) in fonts.fonts.into_iter().enumerate() {
             let font = map_err_return!(
@@ -115,8 +114,8 @@ trace!("Value: {} successfully transformed into FontDictLoaderJSON", json_value.
                     ErrorKind::InvalidData
                 )}
             );
-            #[cfg(trace)]
-trace!("Font: {} successfully loaded from: {}", font_name.clone(), font_path);
+            #[cfg(feature="trace")]
+            trace!("{}", format!("Font: {} successfully loaded from: {}", font_name.clone(), font_path));
 
             if font.len() <= FONT_VEC_SIZE {
                 unsafe {
@@ -130,8 +129,8 @@ trace!("Font: {} successfully loaded from: {}", font_name.clone(), font_path);
                     font_name: font_name.clone(),
                     font_path: font_path.clone()
                 };
-                #[cfg(trace)]
-error!("ERROR: Could not load font: {:#?}", error);
+                #[cfg(feature="trace")]
+                error!("{}", format!("ERROR: Could not load font: {:#?}", error));
 
                 return build_task_error(
                     error,
@@ -153,7 +152,7 @@ error!("ERROR: Could not load font: {:#?}", error);
         let task = font_task.map(|font_dict| {
             FontDict(font_dict)
         });
-        #[cfg(trace)]
+        #[cfg(feature="trace")]
 trace!("EXIT: FontDictLoader::load");
         return task
     }

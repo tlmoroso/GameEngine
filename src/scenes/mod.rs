@@ -16,7 +16,7 @@ pub mod scene_stack;
 
 pub const SCENES_DIR: &str = "scenes/";
 
-pub trait Scene<T: Input>: Debug {
+pub trait Scene<T: Input + Debug>: Debug {
     // Instance Methods
     fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<SceneTransition<T>>;
     fn draw(&mut self, ecs: Arc<RwLock<World>>, frame: &mut Frame, timer: &Timer) -> Result<()>;
@@ -24,6 +24,6 @@ pub trait Scene<T: Input>: Debug {
     fn get_name(&self) -> String;
 }
 
-pub trait SceneLoader<T: Input>: Debug {
+pub trait SceneLoader<T: Input + Debug>: Debug {
     fn load_scene(&self, ecs: Arc<RwLock<World>>, window: &Window) -> Task<Box<dyn Scene<T>>>;
 }

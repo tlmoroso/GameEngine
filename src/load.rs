@@ -11,7 +11,7 @@ use crate::load::LoadError::{JSONLoadConversionError, ValueConversionError, Read
 
 use coffee::load::Task;
 
-#[cfg(trace)]
+#[cfg(feature="trace")]
 use tracing::{instrument, trace, debug};
 
 pub const LOAD_PATH: &str = "assets/JSON/";
@@ -33,33 +33,57 @@ pub struct JSONLoad {
     pub actual_value: Value
 }
 
-#[cfg_attr(trace, instrument(err))]
+#[cfg_attr(feature="trace", instrument(err))]
 pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
-    #[cfg(trace)]
+    #[cfg(feature="trace")]
     trace!("ENTER: load_json");
-    let json_string = read_to_string(file_path).map_err(|e| { ReadError {path: file_path.to_string(), source: e} })?;
-    #[cfg(trace)]
-    debug!("Successfully loaded file into string from: {}", file_path);
-    let json_value = from_str::<Value>(json_string.as_str()).map_err(|e| { ValueConversionError {string_value: json_string, source: e} })?;
-    let load_json = from_value(json_value.clone()).map_err(|e| { JSONLoadConversionError { value: json_value, source: e } });
-    #[cfg(trace)]
+
+    let json_string = read_to_string(file_path)
+        .map_err(|e| {
+            ReadError {
+                path: file_path.to_string(), source: e
+            }
+        })?;
+
+    #[cfg(feature="trace")]
+    debug!("{}", format!("Successfully loaded file into string from: {}", file_path));
+
+    let json_value = from_str::<Value>(json_string.as_str())
+        .map_err(|e| {
+            ValueConversionError {
+                string_value: json_string,
+                source: e
+            }
+        })?;
+
+    let load_json = from_value(json_value.clone())
+        .map_err(|e| {
+            JSONLoadConversionError {
+                value: json_value,
+                source: e
+            }
+        });
+
+    #[cfg(feature="trace")]
     trace!("EXIT: load_json");
-    return load_json
+
+    return load_json;
 }
 
-#[cfg_attr(trace, instrument)]
+#[cfg_attr(feature="trace", instrument)]
 pub fn build_task_error<T>(error: impl Error + Sync + Send + 'static, error_kind: ErrorKind) -> Task<T> {
-    #[cfg(trace)]
+    #[cfg(feature="trace")]
     trace!("ENTER: build_task_error");
+
     let task = Task::new(move || { Err(
-        coffee::Error::IO(std::io::Error::new(error_kind, anyhow::Error::new(error)))
+        coffee::Error::IO(std::io::Error::new(error_kind, error))
     )});
-    #[cfg(trace)]
+
+    #[cfg(feature="trace")]
     trace!("EXIT: build_task_error");
+
     return task
 }
-
-// pub fn convert<T, E: Error>(value: Value, kind: ErrorKind) -> Result<T, >
 
 #[derive(Debug, Error)]
 pub enum LoadError {

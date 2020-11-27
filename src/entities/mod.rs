@@ -17,7 +17,7 @@ use crate::load::LoadError::LoadIDError;
 
 use thiserror::Error;
 
-#[cfg(trace)]
+#[cfg(feature="trace")]
 use tracing::{instrument, trace, error};
 
 pub mod player;
@@ -38,24 +38,28 @@ pub struct EntityLoader<T: ComponentMux> {
 }
 
 impl<T: ComponentMux> EntityLoader<T> {
-    #[cfg_attr(trace, instrument)]
+    #[cfg_attr(feature="trace", instrument)]
     pub fn new(file_path: String) -> Self {
-        #[cfg(trace)]
-trace!("ENTER: EntityLoader::new");
+        #[cfg(feature="trace")]
+        trace!("ENTER: EntityLoader::new");
+
         let new = Self {
             entity_file: file_path,
             component_loaders: Vec::new(),
             phantom: PhantomData,
         };
-        #[cfg(trace)]
-trace!("EXIT: EntityLoader::new");
+
+        #[cfg(feature="trace")]
+        trace!("EXIT: EntityLoader::new");
+
         return new
     }
 
-    #[cfg_attr(trace, instrument(skip(self, ecs, window)))]
+    #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
     pub fn load_entity(&mut self, ecs: Arc<RwLock<World>>, window: &Window) -> Task<Entity> {
-        #[cfg(trace)]
-trace!("ENTER: EntityLoader::load_entity");
+        #[cfg(feature="trace")]
+        trace!("ENTER: EntityLoader::load_entity");
+
         let json_value = map_err_return!(
             load_json(&self.entity_file),
             |e| {
@@ -69,8 +73,9 @@ trace!("ENTER: EntityLoader::load_entity");
                 )
             }
         );
-        #[cfg(trace)]
-trace!("Successfully loaded JSONLoad: {} from: {}", json_value, self.entity_file);
+
+        #[cfg(feature="trace")]
+        trace!("{}", format!("Successfully loaded JSONLoad: {:#?} from: {:#?}", json_value, self.entity_file));
 
         if json_value.load_type_id != ENTITY_LOADER_FILE_ID {
             return build_task_error(
@@ -82,8 +87,9 @@ trace!("Successfully loaded JSONLoad: {} from: {}", json_value, self.entity_file
                 ErrorKind::InvalidData
             )
         }
-        #[cfg(trace)]
-trace!("Load ID: {} matched ENTITY_LOADER_FILE_ID", json_value.load_type_id);
+
+        #[cfg(feature="trace")]
+        trace!("{}", format!("Load ID: {} matched ENTITY_LOADER_FILE_ID", json_value.load_type_id));
 
         let component_paths: EntityLoaderJSON = map_err_return!(
             from_value(json_value.actual_value.clone()),
@@ -97,8 +103,9 @@ trace!("Load ID: {} matched ENTITY_LOADER_FILE_ID", json_value.load_type_id);
                 )
             }
         );
-        #[cfg(trace)]
-trace!("EntityLoaderJSON: {:#?} successfully loaded from {:#?}", json_value.actual_value);
+
+        #[cfg(feature="trace")]
+        trace!("{}", format!("EntityLoaderJSON: {:#?} successfully loaded from {:#?}", component_paths, json_value.actual_value));
 
         for component_path in component_paths.component_paths {
             let json_value = map_err_return!(
@@ -114,8 +121,9 @@ trace!("EntityLoaderJSON: {:#?} successfully loaded from {:#?}", json_value.actu
                     )
                 }
             );
-            #[cfg(trace)]
-trace!("Value: {:#?} loaded from: {:#?}", json_value, component_path);
+
+            #[cfg(feature="trace")]
+            trace!("{}", format!("Value: {:#?} loaded from: {:#?}", json_value, component_path));
 
             self.component_loaders.push( map_err_return!(
                 T::map_json_to_loader(json_value),
@@ -143,8 +151,9 @@ trace!("Value: {:#?} loaded from: {:#?}", json_value, component_path);
                 )
             }
         );
-        #[cfg(trace)]
-trace!("Successfully grabbed write lock for World");
+
+        #[cfg(feature="trace")]
+        trace!("Successfully grabbed write lock for World");
 
         let mut entity_builder = mut_ecs.create_entity();
         for component_loader in &self.component_loaders {
@@ -159,15 +168,19 @@ trace!("Successfully grabbed write lock for World");
                     )
                 }
             );
-            #[cfg(trace)]
-trace!("Added: {} to entity", component_loader.get_name());
+
+            #[cfg(feature="trace")]
+            trace!("{}", format!("Added: {} to entity", component_loader.get_component_name()));
         }
 
         let entity = entity_builder.build();
-        #[cfg(trace)]
-trace!("Entity: {:#?} built", entity);
-        #[cfg(trace)]
-trace!("EXIT: EntityLoader::load_entity");
+
+        #[cfg(feature="trace")]
+        trace!("{}", format!("Entity: {:#?} built", entity));
+
+        #[cfg(feature="trace")]
+        trace!("EXIT: EntityLoader::load_entity");
+
         Task::new(move || { Ok(
             entity
         )})

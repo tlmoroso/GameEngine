@@ -2,6 +2,7 @@ use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_log::LogTracer;
 use tracing_subscriber::{Registry, EnvFilter};
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_appender::non_blocking;
 
 use thiserror::Error;
 use anyhow::Result;
@@ -16,7 +17,7 @@ pub fn init_logger() -> Result<()>{
 
     let app_name = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION")).to_string();
     let file_appender = tracing_appender::rolling::daily("/", "game_engine.log");
-    let (non_blocking_writer, _guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking_writer, _guard) = non_blocking(file_appender);
     let bunyan_formatting_layer = BunyanFormattingLayer::new(app_name, non_blocking_writer);
     let subscriber = Registry::default()
         .with(EnvFilter::new("INFO"))

@@ -8,5 +8,5 @@ pub mod game;
 pub mod input;
 pub mod globals;
 
-#[cfg(trace)]
+#[cfg(feature="trace")]
 pub mod log;
