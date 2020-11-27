@@ -14,6 +14,7 @@ pub const COMPONENTS_DIR: &str = "components/";
 pub trait ComponentLoader: Debug {
     fn load_component(&self, entity_task: EntityBuilder, ecs: Arc<RwLock<World>>, window: &Window) -> Result<EntityBuilder>;
     fn set_value(&mut self, new_value: Value) -> Result<()>;
+    fn get_component_name(&self) -> String;
 }
 
 pub trait ComponentMux {

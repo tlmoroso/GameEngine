@@ -1,14 +1,15 @@
 [package]
 name = "game_engine"
 version = "0.1.0"
-authors = ["Tyler Moroso <tlmoroso@mit.edu>"]
+authors = ["Tyler Moroso <tlmoroso55@gmail.com>"]
 edition = "2018"
 
 [lib]
 name = "game_engine"
 path = "src/lib.rs"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+trace = ["tracing", "tracing-subscriber", "tracing-bunyan-formatter"]
 
 [dependencies]
 coffee = {version = "0.4", features = ["opengl"]}
@@ -17,3 +18,7 @@ serde = {version = "1.0", features = ["derive"]}
 serde_json = {version = "1.0"}
 thiserror = "1.0.22"
 anyhow = "1.0.34"
+tracing = {version = "0.1.22", optional = true}
+tracing-subscriber = {version = "0.2.15", optional = true, features = ["registry"]}
+tracing-bunyan-formatter = {version = "0.1.7", optional = true}
+tracing-log = {version = "0.1.1", optional = true}

@@ -5,24 +5,24 @@ use std::collections::HashSet;
 
 #[derive(Default)]
 pub struct CustomInput {
-    keys_pressed: HashSet<KeyCode>,
-    keys_held: HashSet<KeyCode>,
-    keys_released: HashSet<KeyCode>,
+    pub keys_pressed: HashSet<KeyCode>,
+    pub keys_held: HashSet<KeyCode>,
+    pub keys_released: HashSet<KeyCode>,
 }
 
-impl CustomInput {
-    pub fn get_keys_pressed(&mut self) -> &HashSet<KeyCode> {
-        &self.keys_pressed
-    }
-
-    pub fn get_keys_held(&mut self) -> &HashSet<KeyCode> {
-        &self.keys_held
-    }
-
-    pub fn get_keys_released(&mut self) -> &HashSet<KeyCode> {
-        &self.keys_released
-    }
-}
+// impl CustomInput {
+//     pub fn get_keys_pressed(&mut self) -> &HashSet<KeyCode> {
+//         &self.keys_pressed
+//     }
+//
+//     pub fn get_keys_held(&mut self) -> &HashSet<KeyCode> {
+//         &self.keys_held
+//     }
+//
+//     pub fn get_keys_released(&mut self) -> &HashSet<KeyCode> {
+//         &self.keys_released
+//     }
+// }
 
 impl Input for CustomInput {
     fn new() -> CustomInput {

@@ -7,3 +7,6 @@ pub mod scenes;
 pub mod game;
 pub mod input;
 pub mod globals;
+
+#[cfg(trace)]
+pub mod log;

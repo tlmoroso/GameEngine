@@ -7,12 +7,15 @@ use specs::{World};
 use specs::WorldExt;
 
 use crate::scenes::scene_stack::SceneStack;
+use crate::game::GameError::{GameDrawError, GameInteractError, GameUpdateError};
 
 use std::marker::PhantomData;
 use std::sync::{RwLock, Arc};
 
 use thiserror::Error;
-use crate::game::GameError::{GameDrawError, GameInteractError, GameUpdateError};
+
+#[cfg(trace)]
+use tracing::{instrument, info, error, trace, debug};
 
 pub const GAME_FILE_ID: &str = "game";
 
@@ -36,8 +39,11 @@ impl<T: GameWrapper<U>, U: 'static + Input, V: LoadingScreen> Game for MyGame<T,
     type Input = U;
     type LoadingScreen = V;
 
+    #[cfg_attr(trace, instrument(skip(window)))]
     fn load(window: &Window) -> Task<MyGame<T,U,V>> {
-        (
+        #[cfg(trace)]
+        trace!("ENTER: MyGame::load");
+        let task = (
             T::load_world(window),
             T::load_scene_stack(window),
         )
@@ -49,29 +55,53 @@ impl<T: GameWrapper<U>, U: 'static + Input, V: LoadingScreen> Game for MyGame<T,
                     phantom_wrapper: PhantomData,
                     phantom_loading_screen: PhantomData
                 }
-            })
+            });
+        #[cfg(trace)]
+        trace!("EXIT: MyGame::load");
+        return task
     }
 
+    #[cfg_attr(trace, instrument(skip(self, frame: timer)))]
     fn draw(&mut self, frame: &mut Frame, timer: &Timer) {
+        #[cfg(trace)]
+        trace!("ENTER: MyGame::draw");
         frame.clear(Color::BLACK);
         let result = self.scene_stack.draw(self.ecs.clone(), frame, timer);
         if let Err(e) = result {
+            #[cfg(trace)]
+            error!("ERROR: Game failed during draw function:\n{:#?}", e);
             panic!(GameDrawError { source: e })
         }
+        #[cfg(trace)]
+        trace!("EXIT: MyGame::draw")
     }
 
+    #[cfg_attr(trace, instrument(skip(self, window)))]
     fn interact(&mut self, input: &mut Self::Input, window: &mut Window) {
+        #[cfg(trace)]
+        trace!("ENTER: MyGame::interact");
         let result = self.scene_stack.interact(self.ecs.clone(), input, window);
         if let Err(e) = result {
+            #[cfg(trace)]
+            error!("ERROR: Game failed during interact function:\n{:#?", e);
             panic!(GameInteractError { source: e })
         }
+        #[cfg(trace)]
+        trace!("EXIT: MyGame::interact")
     }
 
+    #[cfg_attr(trace, instrument(skip(self, _window)))]
     fn update(&mut self, _window: &Window) {
+        #[cfg(trace)]
+        trace!("ENTER: MyGame::update");
         let result = self.scene_stack.update(self.ecs.clone());
         if let Err(e) = result {
+            #[cfg(trace)]
+            error!("ERROR: Game failed during update function:\n{:#?}", e);
             panic!(GameUpdateError { source: e })
         }
+        #[cfg(trace)]
+        trace!("EXIT: MyGame::update");
     }
 }
 
