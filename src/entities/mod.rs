@@ -75,7 +75,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         );
 
         #[cfg(feature="trace")]
-        trace!("{}", format!("Successfully loaded JSONLoad: {:#?} from: {:#?}", json_value, self.entity_file));
+        trace!("Successfully loaded JSONLoad: {:#?} from: {:#?}", json_value, self.entity_file);
 
         if json_value.load_type_id != ENTITY_LOADER_FILE_ID {
             return build_task_error(
@@ -89,7 +89,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         }
 
         #[cfg(feature="trace")]
-        trace!("{}", format!("Load ID: {} matched ENTITY_LOADER_FILE_ID", json_value.load_type_id));
+        trace!("Load ID: {} matched ENTITY_LOADER_FILE_ID", json_value.load_type_id);
 
         let component_paths: EntityLoaderJSON = map_err_return!(
             from_value(json_value.actual_value.clone()),
@@ -105,7 +105,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         );
 
         #[cfg(feature="trace")]
-        trace!("{}", format!("EntityLoaderJSON: {:#?} successfully loaded from {:#?}", component_paths, json_value.actual_value));
+        trace!("EntityLoaderJSON: {:#?} successfully loaded from {:#?}", component_paths, json_value.actual_value);
 
         for component_path in component_paths.component_paths {
             let json_value = map_err_return!(
@@ -123,7 +123,7 @@ impl<T: ComponentMux> EntityLoader<T> {
             );
 
             #[cfg(feature="trace")]
-            trace!("{}", format!("Value: {:#?} loaded from: {:#?}", json_value, component_path));
+            trace!("Value: {:#?} loaded from: {:#?}", json_value, component_path);
 
             self.component_loaders.push( map_err_return!(
                 T::map_json_to_loader(json_value),
@@ -170,13 +170,13 @@ impl<T: ComponentMux> EntityLoader<T> {
             );
 
             #[cfg(feature="trace")]
-            trace!("{}", format!("Added: {} to entity", component_loader.get_component_name()));
+            trace!("Added: {} to entity", component_loader.get_component_name());
         }
 
         let entity = entity_builder.build();
 
         #[cfg(feature="trace")]
-        trace!("{}", format!("Entity: {:#?} built", entity));
+        trace!("Entity: {:#?} built", entity);
 
         #[cfg(feature="trace")]
         trace!("EXIT: EntityLoader::load_entity");

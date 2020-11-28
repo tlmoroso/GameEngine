@@ -33,7 +33,7 @@ pub struct JSONLoad {
     pub actual_value: Value
 }
 
-#[cfg_attr(feature="trace", instrument(err))]
+#[cfg_attr(feature="trace", instrument)]
 pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
     #[cfg(feature="trace")]
     trace!("ENTER: load_json");
@@ -46,7 +46,7 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
         })?;
 
     #[cfg(feature="trace")]
-    debug!("{}", format!("Successfully loaded file into string from: {}", file_path));
+    debug!("Successfully loaded file into string from: {}", file_path);
 
     let json_value = from_str::<Value>(json_string.as_str())
         .map_err(|e| {

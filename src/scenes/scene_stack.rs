@@ -79,7 +79,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
             )}
         );
         #[cfg(feature="trace")]
-        trace!("{}", format!("Value: {:#?} successfully loaded from: {:#?}", json_value, self.scene_stack_file));
+        trace!("Value: {:#?} successfully loaded from: {:#?}", json_value, self.scene_stack_file);
 
         if json_value.load_type_id != SCENE_STACK_FILE_ID {
             return build_task_error(
@@ -92,7 +92,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
             )
         }
         #[cfg(feature="trace")]
-        trace!("{}", format!("Value type ID: {} correctly matches SCENE_STACK_FILE_ID", json_value.load_type_id));
+        trace!("Value type ID: {} correctly matches SCENE_STACK_FILE_ID", json_value.load_type_id);
 
         let scene_paths: SceneStackLoaderJSON = map_err_return!(
             from_value(json_value.actual_value.clone()),
@@ -105,7 +105,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
             )}
         );
         #[cfg(feature="trace")]
-        trace!("{}", format!("Value: {} successfully transformed into SceneStackLoaderJSON", json_value.actual_value));
+        trace!("Value: {} successfully transformed into SceneStackLoaderJSON", json_value.actual_value);
 
         let mut scene_task = Task::new(|| {Ok(
             Vec::new()
@@ -124,7 +124,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
                 )}
             );
             #[cfg(feature="trace")]
-            trace!("{}", format!("Scene: {:#?} successfully loaded from: {:#?}", scene_value, scene_path));
+            trace!("Scene: {:#?} successfully loaded from: {:#?}", scene_value, scene_path);
 
             let scene_loader = (self.scene_factory)(scene_value);
             scene_task = (
@@ -163,7 +163,7 @@ impl<T: Input + Debug> SceneStack<T> {
 
         return if let Some(scene) = self.stack.last_mut() {
             #[cfg(feature="trace")]
-            trace!("{}", format!("Calling update on {}", scene.get_name()));
+            trace!("Calling update on {}", scene.get_name());
 
             let transition = scene.update(ecs)
                 .map_err(|e| {
@@ -174,7 +174,7 @@ impl<T: Input + Debug> SceneStack<T> {
                 })?;
 
             #[cfg(feature="trace")]
-            trace!("{}", format!("Scene returned transition: {:#?}", transition));
+            trace!("Scene returned transition: {:#?}", transition);
 
             match transition {
                 SceneTransition::POP(quantity) => {
@@ -184,7 +184,7 @@ impl<T: Input + Debug> SceneStack<T> {
                             .ok_or_else(
                                 || {
                                     #[cfg(feature="trace")]
-                                    error!("{}", format!("Attempted to pop: ({}) more scenes than available: ({}). Failed on iteration: {}", quantity, self.stack.len(), i));
+                                    error!("Attempted to pop: ({}) more scenes than available: ({}). Failed on iteration: {}", quantity, self.stack.len(), i);
 
                                     SceneStackPopError {
                                         num_scenes: self.stack.len(),
@@ -193,7 +193,7 @@ impl<T: Input + Debug> SceneStack<T> {
                                 }
                             )?;
                         #[cfg(feature="trace")]
-                        trace!("{}", format!("Popped scene: {}", scene.get_name()));
+                        trace!("Popped scene: {}", scene.get_name());
                     }
                     #[cfg(feature="trace")]
                     trace!("{} scenes were popped", quantity)
@@ -207,10 +207,10 @@ impl<T: Input + Debug> SceneStack<T> {
                 SceneTransition::SWAP(scene_1, scene_2) => {
                     if scene_1 == scene_2 {
                         #[cfg(feature="trace")]
-                        trace!("{}", format!("Swap unnecessary because indices both equalled: {}", scene_1));
+                        trace!("Swap unnecessary because indices both equalled: {}", scene_1);
                     } else if scene_1 >= self.stack.len() {
                         #[cfg(feature="trace")]
-                        error!("{}", format!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, self.stack.len()));
+                        error!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, self.stack.len());
 
                         return Err( SceneStackSwapError {
                             bad_index: scene_1,
@@ -218,7 +218,7 @@ impl<T: Input + Debug> SceneStack<T> {
                         })
                     } else if scene_2 >= self.stack.len() {
                         #[cfg(feature="trace")]
-                        error!("{}", format!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, self.stack.len()));
+                        error!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, self.stack.len());
 
                         return Err( SceneStackSwapError {
                             bad_index: scene_2,
@@ -237,7 +237,7 @@ impl<T: Input + Debug> SceneStack<T> {
                         self.stack.insert(max, min_scene);
 
                         #[cfg(feature="trace")]
-                        trace!("{}", format!("Swapped stack positions of {} (index: {}) and {} (index: {})", max_name, max, min_name, min));
+                        trace!("Swapped stack positions of {} (index: {}) and {} (index: {})", max_name, max, min_name, min);
                     }
                 }
                 SceneTransition::REPLACE(index, new_scene) => {
@@ -252,7 +252,7 @@ impl<T: Input + Debug> SceneStack<T> {
                         let deleted_scene = self.stack.remove(index + 1);
 
                         #[cfg(feature="trace")]
-                        trace!("{}", format!("Replaced: {:#?} with {:#?}", deleted_scene.get_name(), new_scene_name));
+                        trace!("Replaced: {:#?} with {:#?}", deleted_scene.get_name(), new_scene_name);
                     }
                 }
                 SceneTransition::CLEAR => {
@@ -264,7 +264,7 @@ impl<T: Input + Debug> SceneStack<T> {
                            .ok_or_else(
                                || {
                                    #[cfg(feature="trace")]
-                                   error!("{}", format!("Attempted to pop scene but received None instead. Iteration: {}. Index: {}. Original length: {}.", i, stack_height - 1 - i, stack_height));
+                                   error!("Attempted to pop scene but received None instead. Iteration: {}. Index: {}. Original length: {}.", i, stack_height - 1 - i, stack_height);
 
                                    SceneStackClearError {
                                        bad_index: i,
@@ -275,7 +275,7 @@ impl<T: Input + Debug> SceneStack<T> {
                            )?;
 
                        #[cfg(feature="trace")]
-                       trace!("{}", format!("Clearing stack... Deleted: {} ({}/{})", deleted_scene.get_name(), i + 1, stack_height - 1));
+                       trace!("Clearing stack... Deleted: {} ({}/{})", deleted_scene.get_name(), i + 1, stack_height - 1);
                     }
                     let remaining_scene = self.stack
                         .first()
@@ -320,7 +320,7 @@ impl<T: Input + Debug> SceneStack<T> {
                 })?;
 
             #[cfg(feature="trace")]
-            trace!("{}", format!("Called draw on {}", scene.get_name()));
+            trace!("Called draw on {}", scene.get_name());
 
             #[cfg(feature="trace")]
             trace!("EXIT: SceneStack::draw");
@@ -352,7 +352,7 @@ impl<T: Input + Debug> SceneStack<T> {
                 })?;
 
             #[cfg(feature="trace")]
-            trace!("{}", format!("Called interact on {}", scene.get_name()));
+            trace!("Called interact on {}", scene.get_name());
 
             #[cfg(feature="trace")]
             trace!("EXIT: SceneStack::interact");

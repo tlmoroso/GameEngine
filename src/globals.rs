@@ -75,7 +75,7 @@ impl FontDictLoader {
             )}
         );
         #[cfg(feature="trace")]
-        trace!("{}", format!("Value: {:#?} successfully loaded from: {:#?}", json_value, self.path));
+        trace!("Value: {:#?} successfully loaded from: {:#?}", json_value, self.path);
 
         if json_value.load_type_id == FONT_DICT_FILE_ID {
             return build_task_error(
@@ -88,7 +88,7 @@ impl FontDictLoader {
             )
         }
         #[cfg(feature="trace")]
-        trace!("{}", format!("Value type ID: {} correctly matches FONT_DICT_FILE_ID", json_value.load_type_id.clone()));
+        trace!("Value type ID: {} correctly matches FONT_DICT_FILE_ID", json_value.load_type_id.clone());
 
         let fonts: FontDictLoaderJSON = map_err_return!(
             from_value(json_value.actual_value.clone()),
@@ -101,7 +101,7 @@ impl FontDictLoader {
             )}
         );
         #[cfg(feature="trace")]
-        trace!("{}", format!("Value: {} successfully transformed into FontDictLoaderJSON", json_value.actual_value.clone()));
+        trace!("Value: {} successfully transformed into FontDictLoaderJSON", json_value.actual_value.clone());
 
         for (index, (font_name, font_path)) in fonts.fonts.into_iter().enumerate() {
             let font = map_err_return!(
@@ -115,7 +115,7 @@ impl FontDictLoader {
                 )}
             );
             #[cfg(feature="trace")]
-            trace!("{}", format!("Font: {} successfully loaded from: {}", font_name.clone(), font_path));
+            trace!("Font: {} successfully loaded from: {}", font_name.clone(), font_path);
 
             if font.len() <= FONT_VEC_SIZE {
                 unsafe {
@@ -130,7 +130,7 @@ impl FontDictLoader {
                     font_path: font_path.clone()
                 };
                 #[cfg(feature="trace")]
-                error!("{}", format!("ERROR: Could not load font: {:#?}", error));
+                error!("ERROR: Could not load font: {:#?}", error);
 
                 return build_task_error(
                     error,
@@ -153,7 +153,7 @@ impl FontDictLoader {
             FontDict(font_dict)
         });
         #[cfg(feature="trace")]
-trace!("EXIT: FontDictLoader::load");
+        trace!("EXIT: FontDictLoader::load");
         return task
     }
 }

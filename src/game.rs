@@ -71,7 +71,7 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
         let result = self.scene_stack.draw(self.ecs.clone(), frame, timer);
         if let Err(e) = result {
             #[cfg(feature="trace")]
-            error!("{}", format!("ERROR: Game failed during draw function:\n{:#?}", e));
+            error!("ERROR: Game failed during draw function:\n{:#?}", e);
 
             panic!(GameDrawError { source: e })
         }
@@ -88,7 +88,7 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
         let result = self.scene_stack.interact(self.ecs.clone(), input, window);
         if let Err(e) = result {
             #[cfg(feature="trace")]
-            error!("{}", format!("ERROR: Game failed during interact function:\n{:#?}", e));
+            error!("ERROR: Game failed during interact function:\n{:#?}", e);
 
             panic!(GameInteractError { source: e })
         }
@@ -104,7 +104,7 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
         let result = self.scene_stack.update(self.ecs.clone());
         if let Err(e) = result {
             #[cfg(feature="trace")]
-            error!("{}", format!("ERROR: Game failed during update function:\n{:#?}", e));
+            error!("ERROR: Game failed during update function:\n{:#?}", e);
 
             panic!(GameUpdateError { source: e })
         }
