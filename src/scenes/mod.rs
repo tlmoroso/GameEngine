@@ -22,6 +22,7 @@ pub trait Scene<T: Input + Debug>: Debug {
     fn draw(&mut self, ecs: Arc<RwLock<World>>, frame: &mut Frame, timer: &Timer) -> Result<()>;
     fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &mut T, window: &mut Window) -> Result<()>;
     fn get_name(&self) -> String;
+    fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool>;
 }
 
 pub trait SceneLoader<T: Input + Debug>: Debug {

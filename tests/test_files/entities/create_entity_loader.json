@@ -1,0 +1,6 @@
+{
+  "load_type_id": "create_entity_loader",
+  "actual_value": {
+    "component_paths": ["test_files/components/test_compo"]
+  }
+}

@@ -1,5 +1,5 @@
 use crate::scenes::{Scene, SceneLoader};
-use crate::scenes::scene_stack::SceneStackError::{SceneStackFileLoadError, SceneStackJSONLoadError, SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError};
+use crate::scenes::scene_stack::SceneStackError::{SceneStackFileLoadError, SceneStackJSONLoadError, SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError, SceneStackIsFinishedError};
 use crate::load::{load_json, JSONLoad, LoadError, build_task_error};
 use crate::load::LoadError::{LoadIDError};
 
@@ -368,6 +368,37 @@ impl<T: Input + Debug> SceneStack<T> {
             Err( SceneStackEmptyError {})
         }
     }
+
+    #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
+    pub fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool, SceneStackError> {
+        #[cfg(feature="trace")]
+        trace!("ENTER: SceneStack::is_finished");
+
+        return if let Some(scene) = self.stack.last() {
+            let should_finish = scene.is_finished(ecs)
+                .map_err(|e| {
+                    SceneStackIsFinishedError {
+                        scene_name: scene.get_name(),
+                        source: e
+                    }
+                })?;
+
+            #[cfg(feature="trace")]
+            trace!("Called is_finished on {}. Received: {}", scene.get_name(), should_finish);
+
+            #[cfg(feature="trace")]
+            trace!("EXIT: SceneStack::is_finished");
+
+            Ok(should_finish)
+        } else {
+            #[cfg(feature="trace")]
+            error!("SceneStack was empty");
+
+            #[cfg(feature="trace")]
+            trace!("EXIT: SceneStack::is_finished");
+            Err(SceneStackEmptyError {})
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -419,6 +450,11 @@ pub enum SceneStackError {
     },
     #[error("Error during call to {scene_name}.interact()")]
     SceneStackInteractError {
+        scene_name: String,
+        source: anyhow::Error
+    },
+    #[error("Error during call to {scene_name}.is_finished()")]
+    SceneStackIsFinishedError {
         scene_name: String,
         source: anyhow::Error
     }

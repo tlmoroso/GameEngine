@@ -2,18 +2,18 @@ use specs::{World, EntityBuilder};
 
 use coffee::graphics::Window;
 
-use serde_json::Value;
 use std::sync::{Arc, RwLock};
+use std::fmt::{Debug};
 
 use anyhow::Result;
+
 use crate::load::JSONLoad;
-use std::fmt::{Debug};
 
 pub const COMPONENTS_DIR: &str = "components/";
 
 pub trait ComponentLoader: Debug {
-    fn load_component(&self, entity_task: EntityBuilder, ecs: Arc<RwLock<World>>, window: &Window) -> Result<EntityBuilder>;
-    fn set_value(&mut self, new_value: Value) -> Result<()>;
+    fn load_component<'a>(&self, entity_task: EntityBuilder<'a>, ecs: Arc<RwLock<World>>, window: &Window) -> Result<EntityBuilder<'a>>;
+    fn set_value(&mut self, new_value: JSONLoad) -> Result<()>;
     fn get_component_name(&self) -> String;
 }
 

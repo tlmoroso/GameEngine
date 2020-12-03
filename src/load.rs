@@ -14,8 +14,9 @@ use coffee::load::Task;
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, debug};
 
-pub const LOAD_PATH: &str = "assets/JSON/";
-pub const JSON_FILE: &str = ".json";
+pub(crate) const LOAD_PATH: &str = "assets/JSON/";
+pub(crate)  const JSON_FILE: &str = ".json";
+pub(crate) const TEST_LOAD_PATH: &str = "test_files/";
 
 #[macro_export]
 macro_rules! map_err_return {
