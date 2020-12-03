@@ -16,7 +16,6 @@ use tracing::{instrument, trace, debug};
 
 pub(crate) const LOAD_PATH: &str = "assets/JSON/";
 pub(crate)  const JSON_FILE: &str = ".json";
-pub(crate) const TEST_LOAD_PATH: &str = "test_files/";
 
 #[macro_export]
 macro_rules! map_err_return {

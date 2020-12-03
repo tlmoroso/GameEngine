@@ -1,10 +1,9 @@
-use crate::components::{ComponentMux, ComponentLoader};
-use crate::load::JSONLoad;
-
 use anyhow::Result;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use serde::Deserialize;
 use serde_json::{Value, from_value};
@@ -14,16 +13,27 @@ use coffee::graphics::Window;
 use specs::{EntityBuilder, World, Builder, Component, VecStorage};
 
 use thiserror::Error;
+
 use crate::test_globals::TestGlobalError::{LoadIDMatchError, TestComponentLoadIDError};
 
-pub(crate) const TEST_COMPONENT_LOAD_ID: &str = "test_component";
+use game_engine::components::{ComponentMux, ComponentLoader};
+use game_engine::load::JSONLoad;
+use serde::de::DeserializeOwned;
+
+pub const BASIC_TEST_NUMBER_COMPONENT_LOAD_ID: &str = "basic_test_number_component";
+pub const BASIC_TEST_BOOLEAN_COMPONENT_LOAD_ID: &str = "basic_test_boolean_component";
+pub const BASIC_TEST_TEXT_COMPONENT_LOAD_ID: &str = "basic_test_text_component";
+pub const BASIC_TEST_VECTOR_COMPONENT_LOAD_ID: &str = "basic_test_vector_component";
+pub const BASIC_TEST_MAP_COMPONENT_LOAD_ID: &str = "basic_test_map_component";
+
+pub const TEST_LOAD_PATH: &str = "test_files/";
 
 pub struct TestComponentMux {}
 
 impl ComponentMux for TestComponentMux {
     fn map_json_to_loader(json: JSONLoad) -> Result<Box<dyn ComponentLoader>> {
         return match json.load_type_id.as_str() {
-            TEST_COMPONENT_LOAD_ID => Ok(Box::new(TestComponentLoader::new(json)?)),
+            BASIC_TEST_NUMBER_COMPONENT_LOAD_ID => Ok(Box::new(BasicTestComponentLoader::<BasicNumberTestComponent>::new(json)?)),
             _ => Err(anyhow::Error::new(
                 LoadIDMatchError {
                     load_type_id: json.load_type_id
@@ -33,36 +43,51 @@ impl ComponentMux for TestComponentMux {
     }
 }
 
-#[derive(Deserialize, Debug)]
-pub struct TestComponent {
-    pub number: u32,
-    pub boolean: bool,
-    pub text: String,
-    pub array: Vec<u32>,
-    pub map: HashMap<String, u32>
+pub trait BasicTestComponent: Component + DeserializeOwned + Debug + Send + Sync {
+    const LOAD_ID: &'static str;
 }
 
-impl Component for TestComponent {
+#[derive(Deserialize, Debug)]
+pub struct BasicNumberTestComponent {
+    pub number: u32
+}
+
+impl Component for BasicNumberTestComponent {
     type Storage = VecStorage<Self>;
 }
 
-#[derive(Debug)]
-pub struct TestComponentLoader {
-    pub cached_value: Value,
-    component_name: String
+impl BasicTestComponent for BasicNumberTestComponent {
+    const LOAD_ID: &'static str = BASIC_TEST_NUMBER_COMPONENT_LOAD_ID;
 }
 
-impl TestComponentLoader {
-    pub fn new(json: JSONLoad) -> Result<Self> {
-        return if json.load_type_id == TEST_COMPONENT_LOAD_ID {
+#[derive(Debug)]
+pub struct BasicTestComponentLoader<T: BasicTestComponent> {
+    cached_value: Value,
+    component_name: String,
+    phantom: PhantomData<T>
+}
+
+// #[derive(Deserialize, Debug)]
+// pub struct TestComponent {
+//     pub number: u32,
+//     pub boolean: bool,
+//     pub text: String,
+//     pub array: Vec<u32>,
+//     pub map: HashMap<String, u32>
+// }
+
+impl<T: BasicTestComponent> BasicTestComponentLoader<T> {
+    fn new(json: JSONLoad) -> Result<Self> {
+        return if json.load_type_id == T::LOAD_ID {
             Ok( Self {
                 cached_value: json.actual_value,
-                component_name: TEST_COMPONENT_LOAD_ID.to_string()
+                component_name: T::LOAD_ID.to_string(),
+                phantom: PhantomData
             })
         } else {
             Err(anyhow::Error::new(
                 TestComponentLoadIDError {
-                    expected_id: TEST_COMPONENT_LOAD_ID.to_string(),
+                    expected_id: T::LOAD_ID.to_string(),
                     actual_id: json.load_type_id
                 })
             )
@@ -70,11 +95,11 @@ impl TestComponentLoader {
     }
 }
 
-impl ComponentLoader for TestComponentLoader {
-    fn load_component<'a>(&self, entity_task: EntityBuilder<'a>, ecs: Arc<RwLock<World>>, window: &Window) -> Result<EntityBuilder<'a>> {
+impl<T: BasicTestComponent> ComponentLoader for BasicTestComponentLoader<T> {
+    fn load_component<'b>(&self, entity_task: EntityBuilder<'b>, ecs: Arc<RwLock<World>>, window: &Window) -> Result<EntityBuilder<'b>> {
         Ok(
             entity_task.with(
-                from_value::<TestComponent>(self.cached_value.clone())
+                from_value::<T>(self.cached_value.clone())
                     .map_err(|e| {
                         anyhow::Error::new(e)
                     })?
@@ -83,13 +108,13 @@ impl ComponentLoader for TestComponentLoader {
     }
 
     fn set_value(&mut self, new_value: JSONLoad) -> Result<()> {
-        return if new_value.load_type_id == TEST_COMPONENT_LOAD_ID {
+        return if new_value.load_type_id == T::LOAD_ID {
             self.cached_value = new_value.actual_value;
             Ok(())
         } else {
             Err(anyhow::Error::new(
                 TestComponentLoadIDError {
-                    expected_id: TEST_COMPONENT_LOAD_ID.to_string(),
+                    expected_id: T::LOAD_ID.to_string(),
                     actual_id:  new_value.load_type_id
                 }
             ))
