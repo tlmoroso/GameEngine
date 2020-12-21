@@ -3,7 +3,6 @@ use coffee::load::{Task};
 
 use specs::{Builder, Entity, World, WorldExt};
 
-use serde_json::{Value, from_value};
 use serde::Deserialize;
 
 use std::io::ErrorKind;
@@ -11,9 +10,8 @@ use std::sync::{Arc, RwLock};
 use std::marker::PhantomData;
 
 use crate::components::{ComponentLoader, ComponentMux};
-use crate::load::{load_json, LoadError, build_task_error};
-use crate::entities::EntityError::{EntityFileLoadError, EntityJSONLoadError, EntityComponentLoaderError, EntityWorldWriteLockError, EntityLoadComponentError};
-use crate::load::LoadError::LoadIDError;
+use crate::load::{load_json, LoadError, build_task_error, load_deserializable};
+use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityWorldWriteLockError, EntityLoadComponentError, EntityLoaderDeserializeError};
 
 use thiserror::Error;
 
@@ -27,7 +25,7 @@ pub const ENTITIES_DIR: &str = "entities/";
 pub const ENTITY_LOADER_FILE_ID: &str = "entity_loader";
 
 #[derive(Deserialize, Debug)]
-struct EntityLoaderJSON {
+pub(crate) struct EntityLoaderJSON {
     component_paths: Vec<String>
 }
 
@@ -60,54 +58,20 @@ impl<T: ComponentMux> EntityLoader<T> {
         #[cfg(feature="trace")]
         trace!("ENTER: EntityLoader::load_entity");
 
-        let json_value = map_err_return!(
-            load_json(&self.entity_file),
+        let entity_loader_json: EntityLoaderJSON = map_err_return!(
+            load_deserializable(&self.entity_file, ENTITY_LOADER_FILE_ID),
             |e| {
                 build_task_error(
-                    EntityFileLoadError {
-                        file: self.entity_file.clone(),
-                        var_name: stringify!(self.entity_file).to_string(),
-                        source: e
-                    },
-                 ErrorKind::InvalidData
-                )
-            }
-        );
-
-        #[cfg(feature="trace")]
-        trace!("Successfully loaded JSONLoad: {:#?} from: {:#?}", json_value, self.entity_file);
-
-        if json_value.load_type_id != ENTITY_LOADER_FILE_ID {
-            return build_task_error(
-                LoadIDError {
-                    actual: json_value.load_type_id,
-                    expected: ENTITY_LOADER_FILE_ID.to_owned(),
-                    json_path: self.entity_file.to_owned()
-                },
-                ErrorKind::InvalidData
-            )
-        }
-
-        #[cfg(feature="trace")]
-        trace!("Load ID: {} matched ENTITY_LOADER_FILE_ID", json_value.load_type_id);
-
-        let component_paths: EntityLoaderJSON = map_err_return!(
-            from_value(json_value.actual_value.clone()),
-            |e| {
-                build_task_error(
-                    EntityJSONLoadError {
-                        value: json_value.actual_value.clone(),
+                    EntityLoaderDeserializeError {
+                        file_path: self.entity_file.to_string(),
                         source: e
                     },
                     ErrorKind::InvalidData
                 )
             }
         );
-
-        #[cfg(feature="trace")]
-        trace!("EntityLoaderJSON: {:#?} successfully loaded from {:#?}", component_paths, json_value.actual_value);
-
-        for component_path in component_paths.component_paths {
+        
+        for component_path in entity_loader_json.component_paths {
             let json_value = map_err_return!(
                 load_json(&component_path),
                 |e| {
@@ -195,10 +159,10 @@ pub enum EntityError {
         var_name: String,
         source: LoadError
     },
-    #[error("Error converting serde_json::value::Value into EntityLoaderJSON.\nExpected: Value::Array<Value::String>\nActual: {value}")]
-    EntityJSONLoadError {
-        value: Value,
-        source: serde_json::error::Error
+    #[error("Error creating EntityLoader from: {file_path}")]
+    EntityLoaderDeserializeError {
+        file_path: String,
+        source: LoadError
     },
     #[error("Error creating component loader from path: {component_path}")]
     EntityComponentLoaderError {

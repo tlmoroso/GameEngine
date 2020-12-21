@@ -5,7 +5,6 @@ pub mod components;
 pub mod systems;
 pub mod scenes;
 pub mod game;
-pub mod input;
 pub mod globals;
 
 #[cfg(feature="trace")]

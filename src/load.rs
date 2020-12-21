@@ -4,18 +4,27 @@ use serde::Deserialize;
 use std::io::ErrorKind;
 use std::fs::read_to_string;
 use std::error::Error;
+use std::sync::{RwLock, Arc};
 
 use thiserror::Error;
 
-use crate::load::LoadError::{JSONLoadConversionError, ValueConversionError, ReadError};
-
-use coffee::load::Task;
+use coffee::graphics::Window;
+use coffee::load::{Task, Join};
 
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, debug};
 
+use specs::{World, Entity};
+
+use crate::entities::{EntityLoader};
+use crate::load::LoadError::{JSONLoadConversionError, ValueConversionError, ReadError, LoadIDError, DeserializationError};
+use crate::components::ComponentMux;
+use std::fmt::Debug;
+
 pub(crate) const LOAD_PATH: &str = "assets/JSON/";
-pub(crate)  const JSON_FILE: &str = ".json";
+pub(crate) const JSON_FILE: &str = ".json";
+
+pub(crate) const ENTITY_VEC_LOAD_ID: &str = "entity_vec";
 
 #[macro_export]
 macro_rules! map_err_return {
@@ -27,11 +36,15 @@ macro_rules! map_err_return {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct JSONLoad {
     pub load_type_id: String,
     pub actual_value: Value
 }
+
+// pub trait Loader: Debug {
+//     fn load()
+// }
 
 #[cfg_attr(feature="trace", instrument)]
 pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
@@ -85,6 +98,64 @@ pub fn build_task_error<T>(error: impl Error + Sync + Send + 'static, error_kind
     return task
 }
 
+#[cfg_attr(feature="trace", instrument(skip(ecs, window)))]
+pub fn load_entity_vec<T: ComponentMux>(entity_paths: &Vec<String>, ecs: Arc<RwLock<World>>, window: &Window) -> Task<Vec<Entity>> {
+    let mut entity_task = Task::new(|| {Ok(
+        Vec::new()
+    )});
+
+    for entity_path in entity_paths {
+        let mut entity_loader = EntityLoader::<T>::new(entity_path.to_string());
+
+        entity_task = (
+                entity_loader.load_entity(ecs.clone(), window),
+                entity_task
+            )
+            .join()
+            .map(|(entity, mut entity_vec)| {
+                entity_vec.push(entity);
+                return entity_vec
+            });
+    }
+
+    return entity_task
+}
+
+#[cfg_attr(feature="trace", instrument)]
+pub fn load_deserializable<T: for<'de> Deserialize<'de>>(file_path: &str, file_id: &str) -> Result<T, LoadError> {
+    #[cfg(feature="trace")]
+    trace!("ENTER: load_deserializable");
+
+    let json_value = load_json(file_path)?;
+
+    #[cfg(feature="trace")]
+    trace!("Successfully loaded JSONLoad: {:#?} from: {:#?}", json_value, file_path.to_string());
+
+    if json_value.load_type_id != file_id {
+        return Err( LoadIDError {
+                actual: json_value.load_type_id,
+                expected: file_id.to_string(),
+                json_path: file_path.to_string()
+            })
+    }
+
+    #[cfg(feature="trace")]
+    trace!("Load ID: {} matched given file ID", json_value.load_type_id);
+
+    let deserialized_value: Result<T, LoadError> = from_value(json_value.actual_value.clone())
+        .map_err(|e| {
+            DeserializationError {
+                value: json_value.actual_value,
+                source: e
+            }
+        });
+
+    #[cfg(feature="trace")]
+    trace!("EXIT: load_deserializable");
+
+    return deserialized_value
+}
+
 #[derive(Debug, Error)]
 pub enum LoadError {
     #[error("Error loading file at path: {path}")]
@@ -107,5 +178,24 @@ pub enum LoadError {
         actual: String,
         expected: String,
         json_path: String,
+    },
+    #[error("Error deserializing serde_json::Value: {value}")]
+    DeserializationError {
+        value: Value,
+        source: serde_json::error::Error
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LoadActionError {
+    #[error("Failed to convert serde_json::Value: {json_value} into Vec<String>")]
+    PathVecConversionError {
+        json_value: Value,
+        source: LoadError
+    },
+    #[error("Failed to create JSONLoad object from file path: {file_path}")]
+    JSONLoadError {
+        file_path: String,
+        source: LoadError
     }
 }

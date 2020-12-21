@@ -12,9 +12,19 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 
+use serde::Deserialize;
+use serde_json::Value;
+
 pub mod scene_stack;
 
 pub const SCENES_DIR: &str = "scenes/";
+pub const SCENE_LOADER_JSON_FILE_ID: &str = "scene_loader_json";
+
+#[derive(Deserialize, Debug)]
+pub struct SceneLoaderJSON {
+    pub entity_paths: Vec<String>,
+    pub scene_values: Value
+}
 
 pub trait Scene<T: Input + Debug>: Debug {
     // Instance Methods
@@ -22,7 +32,7 @@ pub trait Scene<T: Input + Debug>: Debug {
     fn draw(&mut self, ecs: Arc<RwLock<World>>, frame: &mut Frame, timer: &Timer) -> Result<()>;
     fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &mut T, window: &mut Window) -> Result<()>;
     fn get_name(&self) -> String;
-    fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool>;
+    fn is_finished(&self) -> Result<bool>;
 }
 
 pub trait SceneLoader<T: Input + Debug>: Debug {

@@ -1,7 +1,6 @@
 use crate::scenes::{Scene, SceneLoader};
-use crate::scenes::scene_stack::SceneStackError::{SceneStackFileLoadError, SceneStackJSONLoadError, SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError, SceneStackIsFinishedError};
-use crate::load::{load_json, JSONLoad, LoadError, build_task_error};
-use crate::load::LoadError::{LoadIDError};
+use crate::scenes::scene_stack::SceneStackError::{SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError, SceneStackIsFinishedError, SceneStackDeserializationError, SceneStackFactoryError};
+use crate::load::{load_json, JSONLoad, LoadError, build_task_error, load_deserializable};
 
 use specs::{World};
 
@@ -16,10 +15,11 @@ use std::sync::{Arc, RwLock};
 use std::cmp::{min, max};
 use std::fmt::Debug;
 
-use serde_json::{Value, from_value};
+use serde_json::{Value};
 use serde::Deserialize;
 
 use thiserror::Error;
+use anyhow::Result;
 
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, error};
@@ -38,17 +38,17 @@ pub enum SceneTransition<T: Input + Debug> {
 
 pub struct SceneStackLoader<T: 'static + Input + Debug> {
     scene_stack_file: String,
-    scene_factory: fn(JSONLoad) -> Box<dyn SceneLoader<T>>
+    scene_factory: fn(JSONLoad) -> Result<Box<dyn SceneLoader<T>>>
 }
 
 #[derive(Deserialize, Debug)]
 struct SceneStackLoaderJSON {
-    scenes: Vec<String>
+    scene_paths: Vec<String>
 }
 
 impl<T: 'static + Input + Debug> SceneStackLoader<T> {
     #[cfg_attr(feature="trace", instrument)]
-    pub fn new(file_path: String, scene_factory: fn(JSONLoad) -> Box<dyn SceneLoader<T>>) -> Self {
+    pub fn new(file_path: String, scene_factory: fn(JSONLoad) -> Result<Box<dyn SceneLoader<T>>>) -> Self {
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStackLoader::new");
 
@@ -67,43 +67,20 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
     pub fn load(self, ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>> {
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStackLoader::load");
-        let json_value = map_err_return!(
-            load_json(&self.scene_stack_file),
-            |e| { build_task_error(
-                SceneStackFileLoadError {
-                    path: self.scene_stack_file.clone(),
-                    var_name: stringify!(self.scene_stack_file).to_string(),
-                    source: e
-                },
-                ErrorKind::InvalidData
-            )}
-        );
-        #[cfg(feature="trace")]
-        trace!("Value: {:#?} successfully loaded from: {:#?}", json_value, self.scene_stack_file);
 
-        if json_value.load_type_id != SCENE_STACK_FILE_ID {
-            return build_task_error(
-                LoadIDError {
-                    actual: json_value.load_type_id,
-                    expected: SCENE_STACK_FILE_ID.to_string(),
-                    json_path: self.scene_stack_file.clone()
-                },
-                ErrorKind::InvalidData
-            )
-        }
-        #[cfg(feature="trace")]
-        trace!("Value type ID: {} correctly matches SCENE_STACK_FILE_ID", json_value.load_type_id);
-
-        let scene_paths: SceneStackLoaderJSON = map_err_return!(
-            from_value(json_value.actual_value.clone()),
-            |e| { build_task_error(
-                SceneStackJSONLoadError {
-                    value: json_value.actual_value.clone(),
-                    source: e
-                },
-                ErrorKind::InvalidData
-            )}
+        let scene_stack_loader: SceneStackLoaderJSON = map_err_return!(
+            load_deserializable(&self.scene_stack_file, SCENE_STACK_FILE_ID),
+            |e| {
+                build_task_error(
+                    SceneStackDeserializationError {
+                        path: self.scene_stack_file,
+                        source: e
+                    },
+                    ErrorKind::InvalidData
+                )
+            }
         );
+
         #[cfg(feature="trace")]
         trace!("Value: {} successfully transformed into SceneStackLoaderJSON", json_value.actual_value);
 
@@ -111,13 +88,12 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
             Vec::new()
         )});
 
-        for scene_path in scene_paths.scenes {
+        for scene_path in scene_stack_loader.scene_paths {
             let scene_value = map_err_return!(
                 load_json(&scene_path),
                 |e| { build_task_error(
-                    SceneStackFileLoadError {
+                    SceneStackDeserializationError {
                         path: scene_path.clone(),
-                        var_name: stringify!(scene_path).to_string(),
                         source: e
                     },
                     ErrorKind::InvalidData
@@ -126,7 +102,17 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
             #[cfg(feature="trace")]
             trace!("Scene: {:#?} successfully loaded from: {:#?}", scene_value, scene_path);
 
-            let scene_loader = (self.scene_factory)(scene_value);
+            let scene_loader = map_err_return!(
+                (self.scene_factory)(scene_value.clone()),
+                |e| { build_task_error(
+                    SceneStackFactoryError {
+                        scene_value: scene_value,
+                        source: e
+                    },
+                    ErrorKind::InvalidData
+                )}
+            );
+
             scene_task = (
                 scene_loader.load_scene(ecs.clone(), window),
                 scene_task
@@ -135,7 +121,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
                 .map(|(scene, mut scene_vec)| {
                     scene_vec.push(scene);
                     return scene_vec
-                })
+                });
         }
 
         let task = scene_task.map(|scene_vec| {
@@ -370,12 +356,12 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
-    pub fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool, SceneStackError> {
+    pub fn is_finished(&self) -> Result<bool, SceneStackError> {
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStack::is_finished");
 
         return if let Some(scene) = self.stack.last() {
-            let should_finish = scene.is_finished(ecs)
+            let should_finish = scene.is_finished()
                 .map_err(|e| {
                     SceneStackIsFinishedError {
                         scene_name: scene.get_name(),
@@ -403,10 +389,14 @@ impl<T: Input + Debug> SceneStack<T> {
 
 #[derive(Error, Debug)]
 pub enum SceneStackError {
-    #[error("Error loading JSON Value for SceneStackLoader from: {var_name} = {path}")]
-    SceneStackFileLoadError {
+    #[error("Error trying to get scene loader from scene factory multiplexer function when passing value: {scene_value:?}")]
+    SceneStackFactoryError {
+        scene_value: JSONLoad,
+        source: anyhow::Error
+    },
+    #[error("Error loading SceneStackLoaderJSON from: {path}")]
+    SceneStackDeserializationError {
         path: String,
-        var_name: String,
         source: LoadError
     },
     #[error("Error converting serde_json::value::Value into SceneStackLoaderJSON.\nExpected: Value::Array<Value::String>\nActual: {value}")]

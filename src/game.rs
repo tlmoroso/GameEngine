@@ -15,21 +15,19 @@ use thiserror::Error;
 
 #[cfg(feature="trace")]
 use tracing::{instrument, error, trace};
-use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError};
+use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError, GameIsFinishedError};
 use std::fmt::Debug;
 
 pub const GAME_FILE_ID: &str = "game";
 
-pub trait GameWrapper<T: Input + Debug>: Game {
+pub trait GameWrapper<T: Input + Debug> {
     // Allow user to pre-fill World with global values here
-    fn load_world(_window: &Window) -> Task<World> {
-        return Task::new(|| {Ok(World::new())})
-    }
+    fn load(_window: &Window) -> Task<(Arc<RwLock<World>>, SceneStack<T>)>;
 
-    fn load_scene_stack(window: &Window) -> Task<SceneStack<T>>;
+    // fn load_scene_stack(ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>>;
 }
 
-struct MyGame<T: GameWrapper<U>, U: Input + Debug, V: LoadingScreen> {
+pub struct MyGame<T: GameWrapper<U>, U: Input + Debug, V: LoadingScreen> {
     scene_stack: SceneStack<U>,
     ecs: Arc<RwLock<World>>,
     phantom_wrapper: PhantomData<T>,
@@ -44,19 +42,15 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
     fn load(window: &Window) -> Task<MyGame<T,U,V>> {
         #[cfg(feature="trace")]
         trace!("ENTER: MyGame::load");
-        let task = (
-            T::load_world(window),
-            T::load_scene_stack(window),
-        )
-            .join()
-            .map(|(ecs, scene_stack)| {
-                MyGame {
-                    scene_stack,
-                    ecs: Arc::new(RwLock::new(ecs)),
-                    phantom_wrapper: PhantomData,
-                    phantom_loading_screen: PhantomData
-                }
-            });
+            let task = T::load(window)
+                .map(|(ecs, scene_stack)| {
+                    MyGame {
+                        scene_stack,
+                        ecs,
+                        phantom_wrapper: PhantomData,
+                        phantom_loading_screen: PhantomData
+                    }
+                });
         #[cfg(feature="trace")]
         trace!("EXIT: MyGame::load");
         return task
@@ -112,6 +106,23 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
         #[cfg(feature="trace")]
         trace!("EXIT: MyGame::update");
     }
+
+    #[cfg_attr(feature="trace", instrument(skip(self)))]
+    fn is_finished(&self) -> bool {
+        #[cfg(feature = "trace")]
+        trace!("ENTER: MyGame::is_finished");
+
+        let should_finish = self.scene_stack.is_finished()
+            .map_err(|e| {
+                GameIsFinishedError {
+                    source: e
+                }
+            }).unwrap();
+
+        #[cfg(feature = "trace")]
+        trace!("EXIT: MyGame::is_finished");
+        return should_finish
+    }
 }
 
 #[derive(Error, Debug)]
@@ -121,5 +132,7 @@ pub enum GameError {
     #[error("Error during interact")]
     GameInteractError { source: SceneStackError },
     #[error("Error during update")]
-    GameUpdateError { source: SceneStackError }
+    GameUpdateError { source: SceneStackError },
+    #[error("Error during is_finished")]
+    GameIsFinishedError { source: SceneStackError }
 }
