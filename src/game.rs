@@ -21,9 +21,9 @@ use std::fmt::Debug;
 pub const GAME_FILE_ID: &str = "game";
 
 pub trait GameWrapper<T: Input + Debug> {
+    fn register_components(ecs: &mut World);
     // Allow user to pre-fill World with global values here
     fn load(_window: &Window) -> Task<(Arc<RwLock<World>>, SceneStack<T>)>;
-
     // fn load_scene_stack(ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>>;
 }
 
@@ -44,6 +44,11 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
         trace!("ENTER: MyGame::load");
             let task = T::load(window)
                 .map(|(ecs, scene_stack)| {
+                    let mut write_ecs = ecs.write().expect("Error acquiring lock for ecs");
+                    T::register_components(&mut write_ecs);
+                    write_ecs.maintain();
+                    std::mem::drop(write_ecs);
+
                     MyGame {
                         scene_stack,
                         ecs,

@@ -1,4 +1,4 @@
-use specs::{World, EntityBuilder};
+use specs::{World, EntityBuilder, Component};
 
 use coffee::graphics::Window;
 
@@ -8,11 +8,12 @@ use std::fmt::{Debug};
 use anyhow::Result;
 
 use crate::load::JSONLoad;
+use specs::world::LazyBuilder;
 
 pub const COMPONENTS_DIR: &str = "components/";
 
 pub trait ComponentLoader: Debug {
-    fn load_component<'a>(&self, entity_task: EntityBuilder<'a>, ecs: Arc<RwLock<World>>, window: &Window) -> Result<EntityBuilder<'a>>;
+    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: &World, window: &Window) -> Result<LazyBuilder<'a>>;
     fn set_value(&mut self, new_value: JSONLoad) -> Result<()>;
     fn get_component_name(&self) -> String;
 }

@@ -1,7 +1,7 @@
 use coffee::graphics::Window;
 use coffee::load::{Task};
 
-use specs::{Builder, Entity, World, WorldExt};
+use specs::{Builder, Entity, World, WorldExt, LazyUpdate};
 
 use serde::Deserialize;
 
@@ -11,12 +11,14 @@ use std::marker::PhantomData;
 
 use crate::components::{ComponentLoader, ComponentMux};
 use crate::load::{load_json, LoadError, build_task_error, load_deserializable};
-use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityWorldWriteLockError, EntityLoadComponentError, EntityLoaderDeserializeError};
+use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityLoadComponentError, EntityLoaderDeserializeError, EntityWorldRWLockError};
 
 use thiserror::Error;
 
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, error};
+use specs::world::EntitiesRes;
+use std::ops::Deref;
 
 pub mod player;
 pub mod textbox;
@@ -72,6 +74,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         );
         
         for component_path in entity_loader_json.component_paths {
+            // println!("Component Path: {:?}", component_path);
             let json_value = map_err_return!(
                 load_json(&component_path),
                 |e| {
@@ -103,11 +106,11 @@ impl<T: ComponentMux> EntityLoader<T> {
             ));
         }
         // Must clone to appease compiler, so mutable ref to ecs is not dropped before the entity is built.
-        let mut mut_ecs = map_err_return!(
-            ecs.write(),
+        let mut read_ecs = map_err_return!(
+            ecs.read(),
             |e| {
                 build_task_error(
-                    EntityWorldWriteLockError {
+                    EntityWorldRWLockError {
                         var_name: stringify!(ecs).to_string(),
                         source_string: format!("{}", e)
                     },
@@ -119,10 +122,13 @@ impl<T: ComponentMux> EntityLoader<T> {
         #[cfg(feature="trace")]
         trace!("Successfully grabbed write lock for World");
 
-        let mut entity_builder = mut_ecs.create_entity();
+        let entities = read_ecs.fetch::<EntitiesRes>();
+        let lazy_update = read_ecs.fetch::<LazyUpdate>();
+        let mut builder = lazy_update.create_entity(&entities);
+
         for component_loader in &self.component_loaders {
-            entity_builder = map_err_return!(
-                component_loader.load_component(entity_builder, ecs.clone(), window),
+            builder = map_err_return!(
+                component_loader.load_component(builder, &read_ecs, window),
                 |e| {
                     build_task_error(
                         EntityLoadComponentError {
@@ -137,7 +143,7 @@ impl<T: ComponentMux> EntityLoader<T> {
             trace!("Added: {} to entity", component_loader.get_component_name());
         }
 
-        let entity = entity_builder.build();
+        let entity = builder.build();
 
         #[cfg(feature="trace")]
         trace!("Entity: {:#?} built", entity);
@@ -170,7 +176,7 @@ pub enum EntityError {
         source: anyhow::Error
     },
     #[error("Error retrieving lock for {var_name}\nError Source: {source_string}")]
-    EntityWorldWriteLockError {
+    EntityWorldRWLockError {
         var_name: String,
         source_string: String
     },
