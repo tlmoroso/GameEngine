@@ -120,7 +120,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         );
 
         #[cfg(feature="trace")]
-        trace!("Successfully grabbed write lock for World");
+        trace!("Successfully grabbed read lock for World");
 
         let entities = read_ecs.fetch::<EntitiesRes>();
         let lazy_update = read_ecs.fetch::<LazyUpdate>();

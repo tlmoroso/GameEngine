@@ -21,7 +21,8 @@ use tracing::{instrument, trace, error};
 
 pub const FONT_DICT_FILE_ID: &str = "font_dict";
 
-pub struct FontDict(pub(crate) HashMap<String, Font>);
+#[derive(Default)]
+pub struct FontDict(pub HashMap<String, Font>);
 
 pub const FONTS_DIR: &str = "fonts/";
 
@@ -77,7 +78,7 @@ impl FontDictLoader {
         #[cfg(feature="trace")]
         trace!("Value: {:#?} successfully loaded from: {:#?}", json_value, self.path);
 
-        if json_value.load_type_id == FONT_DICT_FILE_ID {
+        if json_value.load_type_id != FONT_DICT_FILE_ID {
             return build_task_error(
                 LoadError::LoadIDError {
                     actual: json_value.load_type_id,
@@ -117,7 +118,7 @@ impl FontDictLoader {
             #[cfg(feature="trace")]
             trace!("Font: {} successfully loaded from: {}", font_name.clone(), font_path);
 
-            if font.len() <= FONT_VEC_SIZE {
+            if font.len() <= FONT_FILE_SIZE {
                 unsafe {
                     for (i, byte) in font.iter().enumerate() {
                         FONT_BYTES[index][i] = *byte
