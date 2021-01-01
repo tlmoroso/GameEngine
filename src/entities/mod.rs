@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 use std::marker::PhantomData;
 
 use crate::components::{ComponentLoader, ComponentMux};
-use crate::load::{load_json, LoadError, build_task_error, load_deserializable};
+use crate::load::{load_json, LoadError, build_task_error, load_deserializable_from_file};
 use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityLoadComponentError, EntityLoaderDeserializeError, EntityWorldRWLockError};
 
 use thiserror::Error;
@@ -18,7 +18,6 @@ use thiserror::Error;
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, error};
 use specs::world::EntitiesRes;
-use std::ops::Deref;
 
 pub mod player;
 pub mod textbox;
@@ -61,7 +60,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         trace!("ENTER: EntityLoader::load_entity");
 
         let entity_loader_json: EntityLoaderJSON = map_err_return!(
-            load_deserializable(&self.entity_file, ENTITY_LOADER_FILE_ID),
+            load_deserializable_from_file(&self.entity_file, ENTITY_LOADER_FILE_ID),
             |e| {
                 build_task_error(
                     EntityLoaderDeserializeError {
@@ -74,7 +73,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         );
         
         for component_path in entity_loader_json.component_paths {
-            // println!("Component Path: {:?}", component_path);
+            println!("Component Path: {:?}", component_path);
             let json_value = map_err_return!(
                 load_json(&component_path),
                 |e| {
@@ -106,7 +105,7 @@ impl<T: ComponentMux> EntityLoader<T> {
             ));
         }
         // Must clone to appease compiler, so mutable ref to ecs is not dropped before the entity is built.
-        let mut read_ecs = map_err_return!(
+        let read_ecs = map_err_return!(
             ecs.read(),
             |e| {
                 build_task_error(

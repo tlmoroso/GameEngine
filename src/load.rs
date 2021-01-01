@@ -122,9 +122,9 @@ pub fn load_entity_vec<T: ComponentMux>(entity_paths: &Vec<String>, ecs: Arc<RwL
 }
 
 #[cfg_attr(feature="trace", instrument)]
-pub fn load_deserializable<T: for<'de> Deserialize<'de>>(file_path: &str, file_id: &str) -> Result<T, LoadError> {
+pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de>>(file_path: &str, file_id: &str) -> Result<T, LoadError> {
     #[cfg(feature="trace")]
-    trace!("ENTER: load_deserializable");
+    trace!("ENTER: load_deserializable_from_file");
 
     let json_value = load_json(file_path)?;
 
@@ -135,7 +135,6 @@ pub fn load_deserializable<T: for<'de> Deserialize<'de>>(file_path: &str, file_i
         return Err( LoadIDError {
                 actual: json_value.load_type_id,
                 expected: file_id.to_string(),
-                json_path: file_path.to_string()
             })
     }
 
@@ -151,9 +150,29 @@ pub fn load_deserializable<T: for<'de> Deserialize<'de>>(file_path: &str, file_i
         });
 
     #[cfg(feature="trace")]
-    trace!("EXIT: load_deserializable");
+    trace!("EXIT: load_deserializable_from_file");
 
     return deserialized_value
+}
+
+#[cfg_attr(feature="trace", instrument)]
+pub fn load_deserializable_from_json<T: for<'de> Deserialize<'de>>(json: JSONLoad, load_id: &str) -> Result<T, LoadError> {
+    return if json.load_type_id == load_id {
+        from_value::<T>(json.actual_value.clone())
+            .map_err(|e| {
+                JSONLoadConversionError {
+                    value: json.actual_value,
+                    source: e
+                }
+            })
+    } else {
+        Err(
+            LoadIDError {
+                actual: json.load_type_id,
+                expected: load_id.to_string()
+            }
+        )
+    }
 }
 
 #[derive(Debug, Error)]
@@ -173,11 +192,10 @@ pub enum LoadError {
         value: Value,
         source: serde_json::error::Error
     },
-    #[error("Error matching given load ID to type expected.\nFrom: {json_path}\nExpected: {expected}\nActual: {actual}")]
+    #[error("Error matching given load ID to type expected.\nExpected: {expected}\nActual: {actual}")]
     LoadIDError {
         actual: String,
         expected: String,
-        json_path: String,
     },
     #[error("Error deserializing serde_json::Value: {value}")]
     DeserializationError {

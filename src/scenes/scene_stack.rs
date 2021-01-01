@@ -1,6 +1,6 @@
 use crate::scenes::{Scene, SceneLoader};
 use crate::scenes::scene_stack::SceneStackError::{SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError, SceneStackIsFinishedError, SceneStackDeserializationError, SceneStackFactoryError};
-use crate::load::{load_json, JSONLoad, LoadError, build_task_error, load_deserializable};
+use crate::load::{load_json, JSONLoad, LoadError, build_task_error, load_deserializable_from_file};
 
 use specs::{World};
 
@@ -69,7 +69,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
         trace!("ENTER: SceneStackLoader::load");
 
         let scene_stack_loader: SceneStackLoaderJSON = map_err_return!(
-            load_deserializable(&self.scene_stack_file, SCENE_STACK_FILE_ID),
+            load_deserializable_from_file(&self.scene_stack_file, SCENE_STACK_FILE_ID),
             |e| {
                 build_task_error(
                     SceneStackDeserializationError {

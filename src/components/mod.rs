@@ -1,3 +1,5 @@
+pub mod drawables;
+
 use specs::{World, EntityBuilder, Component};
 
 use coffee::graphics::Window;
