@@ -17,6 +17,7 @@ use thiserror::Error;
 use tracing::{instrument, error, trace};
 use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError, GameIsFinishedError};
 use std::fmt::Debug;
+use kira::manager::{AudioManagerSettings, AudioManager};
 
 pub const GAME_FILE_ID: &str = "game";
 

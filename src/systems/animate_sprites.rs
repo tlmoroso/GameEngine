@@ -19,18 +19,11 @@ impl<'a> System<'a> for AnimateSprites {
 
                     if sprite.frame_pause_counter == total_frames {
                         sprite.frame_pause_counter = 0;
-                        // sprite.current_frame = sprite.start_frame;
-                        // sprite.sprite.source.y = sprite.start_frame * sprite.sprite.source.height;
                         let height_difference = ((sprite.end_frame - sprite.start_frame) * sprite.sprite.source.height);
-                        println!("Height Difference: {}", height_difference);
-                        println!("Current Y: {}", sprite.sprite.source.y);
-                        println!("Original Y: {}", sprite.sprite.source.y - height_difference);
                         sprite.sprite.source.y = sprite.sprite.source.y - height_difference;
                     }
 
                     if sprite.frame_pause_counter != 0 && sprite.frame_pause_counter % sprite.frame_pause == 0 {
-                        // sprite.current_frame += 1;
-                        println!("Current frame: {}", sprite.frame_pause_counter);
                         sprite.sprite.source.y += sprite.sprite.source.height;
                     }
 

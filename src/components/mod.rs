@@ -1,4 +1,5 @@
 pub mod drawables;
+pub mod audibles;
 
 use specs::{World, EntityBuilder, Component};
 
