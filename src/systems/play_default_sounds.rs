@@ -1,5 +1,5 @@
 use specs::{System, Write, Join, WriteStorage};
-use crate::globals::AudioController;
+use crate::globals::audio_controller::AudioController;
 use crate::components::audibles::default_sound::DefaultSound;
 use kira::instance::{InstanceSettings, StopInstanceSettings};
 

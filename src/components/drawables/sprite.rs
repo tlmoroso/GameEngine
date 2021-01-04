@@ -5,7 +5,7 @@ use crate::load::{JSONLoad, load_deserializable_from_json};
 use specs::world::LazyBuilder;
 use anyhow::{Error, Result};
 use crate::load::LoadError::LoadIDError;
-use crate::globals::ImageDict;
+use crate::globals::image_dict::ImageDict;
 use serde::Deserialize;
 
 pub const SPRITE_LOAD_ID: &str = "sprite";

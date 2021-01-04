@@ -1,6 +1,6 @@
 use coffee::graphics::{Frame, Color, Text as CoffeeText};
 use specs::{System, Write, ReadStorage, Join, Read};
-use crate::globals::{FontDict, ImageDict};
+use crate::globals::{image_dict::ImageDict, font_dict::FontDict};
 use crate::components::drawables::Drawable;
 use std::borrow::BorrowMut;
 use std::collections::HashSet;

@@ -42,10 +42,6 @@ pub struct JSONLoad {
     pub actual_value: Value
 }
 
-// pub trait Loader: Debug {
-//     fn load()
-// }
-
 #[cfg_attr(feature="trace", instrument)]
 pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
     #[cfg(feature="trace")]
