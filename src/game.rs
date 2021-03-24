@@ -1,4 +1,4 @@
-use coffee::graphics::{Color, Frame, Window};
+use coffee::graphics::{Color, Frame, Window, WindowSettings};
 use coffee::load::{Task, Join, LoadingScreen};
 use coffee::input::Input;
 use coffee::{Game, Timer};
