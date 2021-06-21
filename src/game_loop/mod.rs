@@ -6,6 +6,7 @@ use glfw::{WindowEvent, Key, Action, Context as _};
 use crate::input::Input;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use specs::{World, WorldExt};
 
 pub struct GameLoop<T: GameWrapper<U>, U: Input + Debug> {
     wrapper: PhantomData<T>,
@@ -35,6 +36,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
         let back_buffer = ctxt.back_buffer().expect("back buffer");
 
         let mut input = U::new();
+        let mut ecs = World::new();
 
         'app: loop {
             // handle events
@@ -54,20 +56,20 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
                     | WindowEvent::Key(..)
                     | WindowEvent::Char(_) => {
                         input.update(event);
-                        game.interact(&input);
+                        game.interact(&mut ecs, &input);
                     },
                     _ => ()
                 }
 
                 // Update
-                game.update();
+                game.update(&mut ecs);
 
                 // Draw
-                game.draw();
+                game.draw(&mut ecs);
                 ctxt.window.swap_buffers();
 
                 // Exit if finished
-                if game.is_finished() { break 'app }
+                if game.is_finished(&mut ecs) { break 'app }
 
                 // Clear the input before next frame
                 input.clear();

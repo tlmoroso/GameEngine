@@ -31,7 +31,7 @@ pub trait Scene<T: Input + Debug>: Debug {
     fn draw(&mut self, ecs: &mut World) -> Result<()>;
     fn interact(&mut self, ecs: &mut World, input: &T) -> Result<()>;
     fn get_name(&self) -> String;
-    fn is_finished(&self) -> Result<bool>;
+    fn is_finished(&self, ecs: &mut World) -> Result<bool>;
 }
 
 pub trait SceneLoader<T: Input + Debug>: Debug {

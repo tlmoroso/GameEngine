@@ -349,12 +349,12 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
-    pub fn is_finished(&self) -> Result<bool, SceneStackError> {
+    pub fn is_finished(&self, ecs: &mut World) -> Result<bool, SceneStackError> {
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStack::is_finished");
 
         return if let Some(scene) = self.stack.last() {
-            let should_finish = scene.is_finished()
+            let should_finish = scene.is_finished(ecs)
                 .map_err(|e| {
                     SceneStackIsFinishedError {
                         scene_name: scene.get_name(),
