@@ -4,10 +4,7 @@ use crate::load::{load_json, JSONLoad, LoadError, build_task_error, load_deseria
 
 use specs::{World};
 
-use coffee::graphics::{Window, Frame};
-use coffee::load::{Task, Join};
-use coffee::Timer;
-use coffee::input::Input;
+// use coffee::load::{Task, Join};
 
 use std::io::ErrorKind;
 use std::marker::PhantomData;
@@ -24,6 +21,9 @@ use anyhow::Result;
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, error};
 
+use crate::input::Input;
+use crate::loading::{Task};
+
 pub const SCENE_STACK_FILE_ID: &str = "scene_stack";
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ pub enum SceneTransition<T: Input + Debug> {
     NONE,
 }
 
-pub struct SceneStackLoader<T: 'static + Input + Debug> {
+pub struct SceneStackLoader<T: Input + Debug> {
     scene_stack_file: String,
     scene_factory: fn(JSONLoad) -> Result<Box<dyn SceneLoader<T>>>
 }
@@ -46,7 +46,7 @@ struct SceneStackLoaderJSON {
     scene_paths: Vec<String>
 }
 
-impl<T: 'static + Input + Debug> SceneStackLoader<T> {
+impl<T: Input + Debug + 'static> SceneStackLoader<T> {
     #[cfg_attr(feature="trace", instrument)]
     pub fn new(file_path: String, scene_factory: fn(JSONLoad) -> Result<Box<dyn SceneLoader<T>>>) -> Self {
         #[cfg(feature="trace")]
@@ -64,7 +64,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self,ecs, window)))]
-    pub fn load(self, ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>> {
+    pub fn load(self, ecs: &mut World) -> Task<SceneStack<T>> {
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStackLoader::load");
 
@@ -75,8 +75,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
                     SceneStackDeserializationError {
                         path: self.scene_stack_file,
                         source: e
-                    },
-                    ErrorKind::InvalidData
+                    }
                 )
             }
         );
@@ -84,7 +83,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
         #[cfg(feature="trace")]
         trace!("Value: {} successfully transformed into SceneStackLoaderJSON", json_value.actual_value);
 
-        let mut scene_task = Task::new(|| {Ok(
+        let mut scene_task = Task::new(|_| {Ok(
             Vec::new()
         )});
 
@@ -95,8 +94,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
                     SceneStackDeserializationError {
                         path: scene_path.clone(),
                         source: e
-                    },
-                    ErrorKind::InvalidData
+                    }
                 )}
             );
             #[cfg(feature="trace")]
@@ -108,27 +106,22 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
                     SceneStackFactoryError {
                         scene_value: scene_value,
                         source: e
-                    },
-                    ErrorKind::InvalidData
+                    }
                 )}
             );
 
-            scene_task = (
-                scene_loader.load_scene(ecs.clone(), window),
-                scene_task
-            )
-                .join()
-                .map(|(scene, mut scene_vec)| {
+            scene_task = scene_loader.load_scene(ecs)
+                .join(scene_task, |(scene, mut scene_vec)|{
                     scene_vec.push(scene);
                     return scene_vec
                 });
         }
 
-        let task = scene_task.map(|scene_vec| {
-            SceneStack {
+        let task = scene_task.map(|scene_vec,_| {
+            Ok(SceneStack {
                 stack: scene_vec,
                 phantom_input: PhantomData
-            }
+            })
         });
         #[cfg(feature="trace")]
         trace!("EXIT: SceneStackLoader::load");
@@ -143,7 +136,7 @@ pub struct SceneStack<T: Input + Debug> {
 
 impl<T: Input + Debug> SceneStack<T> {
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<(), SceneStackError> {
+    pub fn update(&mut self, ecs: &mut World) -> Result<(), SceneStackError> {
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStack::update");
 
@@ -164,8 +157,8 @@ impl<T: Input + Debug> SceneStack<T> {
 
             match transition {
                 SceneTransition::POP(quantity) => {
-                    for i in 0..quantity {
-                        let scene = self.stack
+                    for _ in 0..quantity {
+                        let _scene = self.stack
                             .pop()
                             .ok_or_else(
                                 || {
@@ -179,7 +172,7 @@ impl<T: Input + Debug> SceneStack<T> {
                                 }
                             )?;
                         #[cfg(feature="trace")]
-                        trace!("Popped scene: {}", scene.get_name());
+                        trace!("Popped scene: {}", _scene.get_name());
                     }
                     #[cfg(feature="trace")]
                     trace!("{} scenes were popped", quantity)
@@ -214,16 +207,16 @@ impl<T: Input + Debug> SceneStack<T> {
                         let max = max(scene_1, scene_2);
                         let min = min(scene_1, scene_2);
                         let max_scene = self.stack.remove(max);
-                        let max_name = max_scene.get_name();
+                        let _max_name = max_scene.get_name();
 
                         self.stack.insert(min, max_scene);
 
                         let min_scene = self.stack.remove(min + 1);
-                        let min_name = min_scene.get_name();
+                        let _min_name = min_scene.get_name();
                         self.stack.insert(max, min_scene);
 
                         #[cfg(feature="trace")]
-                        trace!("Swapped stack positions of {} (index: {}) and {} (index: {})", max_name, max, min_name, min);
+                        trace!("Swapped stack positions of {} (index: {}) and {} (index: {})", _max_name, max, _min_name, min);
                     }
                 }
                 SceneTransition::REPLACE(index, new_scene) => {
@@ -233,12 +226,12 @@ impl<T: Input + Debug> SceneStack<T> {
                                 length: self.stack.len()
                             })
                     } else {
-                        let new_scene_name = new_scene.get_name();
+                        let _new_scene_name = new_scene.get_name();
                         self.stack.insert(index, new_scene);
-                        let deleted_scene = self.stack.remove(index + 1);
+                        let _deleted_scene = self.stack.remove(index + 1);
 
                         #[cfg(feature="trace")]
-                        trace!("Replaced: {:#?} with {:#?}", deleted_scene.get_name(), new_scene_name);
+                        trace!("Replaced: {:#?} with {:#?}", _deleted_scene.get_name(), _new_scene_name);
                     }
                 }
                 SceneTransition::CLEAR => {
@@ -263,14 +256,14 @@ impl<T: Input + Debug> SceneStack<T> {
                        #[cfg(feature="trace")]
                        trace!("Clearing stack... Deleted: {} ({}/{})", deleted_scene.get_name(), i + 1, stack_height - 1);
                     }
-                    let remaining_scene = self.stack
+                    let _remaining_scene = self.stack
                         .first()
                         .ok_or(
                             SceneStackEmptyError {}
                         )?;
 
                     #[cfg(feature="trace")]
-                    trace!("Cleared full scene stack except for bottom scene: {}", remaining_scene.get_name())
+                    trace!("Cleared full scene stack except for bottom scene: {}", _remaining_scene.get_name())
                 }
                 SceneTransition::NONE => {
                     #[cfg(feature="trace")]
@@ -291,13 +284,13 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, frame, timer)))]
-    pub fn draw(&mut self, ecs: Arc<RwLock<World>>, frame: &mut Frame, timer: &Timer) -> Result<(), SceneStackError> {
+    pub fn draw(&mut self, ecs: &mut World) -> Result<(), SceneStackError> {
 
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStack::draw");
 
         return if let Some(scene) = self.stack.last_mut() {
-            scene.draw(ecs, frame, timer)
+            scene.draw(ecs)
                 .map_err( |e| {
                     SceneStackDrawError {
                         scene_name: scene.get_name(),
@@ -324,12 +317,12 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
-    pub fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &mut T, window: &mut Window) -> Result<(), SceneStackError> {
+    pub fn interact(&mut self, ecs: &mut World, input: &T) -> Result<(), SceneStackError> {
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStack::interact");
 
         return if let Some(scene) = self.stack.last_mut() {
-            scene.interact(ecs, input, window)
+            scene.interact(ecs, input)
                 .map_err(|e| {
                     SceneStackInteractError {
                         scene_name: scene.get_name(),

@@ -1,10 +1,6 @@
-use coffee::graphics::{Color, Frame, Window, WindowSettings};
-use coffee::load::{Task, Join, LoadingScreen};
-use coffee::input::Input;
-use coffee::{Game, Timer};
+use coffee::load::{Task};
 
 use specs::{World};
-use specs::WorldExt;
 
 use crate::scenes::scene_stack::{SceneStack, SceneStackError};
 
@@ -17,44 +13,39 @@ use thiserror::Error;
 use tracing::{instrument, error, trace};
 use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError, GameIsFinishedError};
 use std::fmt::Debug;
-use kira::manager::{AudioManagerSettings, AudioManager};
+use crate::input::Input;
 
 pub const GAME_FILE_ID: &str = "game";
 
 pub trait GameWrapper<T: Input + Debug> {
     fn register_components(ecs: &mut World);
     // Allow user to pre-fill World with global values here
-    fn load(_window: &Window) -> Task<(Arc<RwLock<World>>, SceneStack<T>)>;
+    fn load() -> Task<(World, SceneStack<T>)>;
     // fn load_scene_stack(ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>>;
 }
 
-pub struct MyGame<T: GameWrapper<U>, U: Input + Debug, V: LoadingScreen> {
+pub struct Game<T: GameWrapper<U>, U: Input + Debug> {
     scene_stack: SceneStack<U>,
-    ecs: Arc<RwLock<World>>,
+    ecs: World,
     phantom_wrapper: PhantomData<T>,
-    phantom_loading_screen: PhantomData<V>,
 }
 
-impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for MyGame<T,U,V> {
-    type Input = U;
-    type LoadingScreen = V;
-
+impl<T: GameWrapper<U>, U: Input + Debug + 'static> Game<T,U> {
     #[cfg_attr(feature="trace", instrument(skip(window)))]
-    fn load(window: &Window) -> Task<MyGame<T,U,V>> {
+    pub(crate) fn load() -> Task<Game<T,U>> {
         #[cfg(feature="trace")]
         trace!("ENTER: MyGame::load");
-            let task = T::load(window)
-                .map(|(ecs, scene_stack)| {
-                    let mut write_ecs = ecs.write().expect("Error acquiring lock for ecs");
-                    T::register_components(&mut write_ecs);
-                    write_ecs.maintain();
-                    std::mem::drop(write_ecs);
+            let task = T::load()
+                .map(|(mut ecs, scene_stack)| {
+                    // let mut write_ecs = ecs.write().expect("Error acquiring lock for ecs");
+                    T::register_components(&mut ecs);
+                    // write_ecs.maintain();
+                    // std::mem::drop(write_ecs);
 
-                    MyGame {
+                    Game {
                         scene_stack,
                         ecs,
                         phantom_wrapper: PhantomData,
-                        phantom_loading_screen: PhantomData
                     }
                 });
         #[cfg(feature="trace")]
@@ -63,12 +54,12 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, frame, timer)))]
-    fn draw(&mut self, frame: &mut Frame, timer: &Timer) {
+    pub(crate) fn draw(&mut self) {
         #[cfg(feature="trace")]
         trace!("ENTER: MyGame::draw");
 
-        frame.clear(Color::BLACK);
-        let result = self.scene_stack.draw(self.ecs.clone(), frame, timer);
+        // frame.clear(Color::BLACK);
+        let result = self.scene_stack.draw(&mut self.ecs);
         if let Err(e) = result {
             #[cfg(feature="trace")]
             error!("ERROR: Game failed during draw function:\n{:#?}", e);
@@ -81,11 +72,11 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, window)))]
-    fn interact(&mut self, input: &mut Self::Input, window: &mut Window) {
+    pub(crate) fn interact(&mut self, input: &U) {
         #[cfg(feature="trace")]
         trace!("ENTER: MyGame::interact");
 
-        let result = self.scene_stack.interact(self.ecs.clone(), input, window);
+        let result = self.scene_stack.interact(&mut self.ecs, input);
         if let Err(e) = result {
             #[cfg(feature="trace")]
             error!("ERROR: Game failed during interact function:\n{:#?}", e);
@@ -97,11 +88,11 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, _window)))]
-    fn update(&mut self, _window: &Window) {
+    pub(crate) fn update(&mut self) {
         #[cfg(feature="trace")]
         trace!("ENTER: MyGame::update");
 
-        let result = self.scene_stack.update(self.ecs.clone());
+        let result = self.scene_stack.update(&mut self.ecs);
         if let Err(e) = result {
             #[cfg(feature="trace")]
             error!("ERROR: Game failed during update function:\n{:#?}", e);
@@ -114,7 +105,7 @@ impl<T: GameWrapper<U>, U: 'static + Input + Debug, V: LoadingScreen> Game for M
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self)))]
-    fn is_finished(&self) -> bool {
+    pub(crate) fn is_finished(&self) -> bool {
         #[cfg(feature = "trace")]
         trace!("ENTER: MyGame::is_finished");
 

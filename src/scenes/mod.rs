@@ -1,9 +1,6 @@
 use crate::scenes::scene_stack::SceneTransition;
 
-use coffee::graphics::{Window, Frame};
-use coffee::{Timer};
-use coffee::input::Input;
-use coffee::load::{Task};
+// use coffee::load::{Task};
 
 use specs::{World};
 
@@ -14,6 +11,8 @@ use anyhow::Result;
 
 use serde::Deserialize;
 use serde_json::Value;
+use crate::input::Input;
+use crate::loading::{Task};
 
 pub mod scene_stack;
 
@@ -28,13 +27,13 @@ pub struct SceneLoaderJSON {
 
 pub trait Scene<T: Input + Debug>: Debug {
     // Instance Methods
-    fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<SceneTransition<T>>;
-    fn draw(&mut self, ecs: Arc<RwLock<World>>, frame: &mut Frame, timer: &Timer) -> Result<()>;
-    fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &mut T, window: &mut Window) -> Result<()>;
+    fn update(&mut self, ecs: &mut World) -> Result<SceneTransition<T>>;
+    fn draw(&mut self, ecs: &mut World) -> Result<()>;
+    fn interact(&mut self, ecs: &mut World, input: &T) -> Result<()>;
     fn get_name(&self) -> String;
     fn is_finished(&self) -> Result<bool>;
 }
 
 pub trait SceneLoader<T: Input + Debug>: Debug {
-    fn load_scene(&self, ecs: Arc<RwLock<World>>, window: &Window) -> Task<Box<dyn Scene<T>>>;
+    fn load_scene(&self, ecs: &mut World) -> Task<Box<dyn Scene<T>>>;
 }

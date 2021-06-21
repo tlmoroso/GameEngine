@@ -1,4 +1,4 @@
-use coffee::graphics::{Frame, Color, Text as CoffeeText};
+use coffee::graphics::{Frame, Color};
 use specs::{System, Write, ReadStorage, Join, Read};
 use crate::globals::{image_dict::ImageDict, font_dict::FontDict};
 use crate::components::drawables::Drawable;

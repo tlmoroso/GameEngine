@@ -1,5 +1,4 @@
 use specs::{System, WriteStorage, Join};
-use crate::components::drawables::animated_sprite::AnimatedSprite;
 use crate::components::drawables::Drawable;
 
 pub struct AnimateSprites;
@@ -19,7 +18,7 @@ impl<'a> System<'a> for AnimateSprites {
 
                     if sprite.frame_pause_counter == total_frames {
                         sprite.frame_pause_counter = 0;
-                        let height_difference = ((sprite.end_frame - sprite.start_frame) * sprite.sprite.source.height);
+                        let height_difference = (sprite.end_frame - sprite.start_frame) * sprite.sprite.source.height;
                         sprite.sprite.source.y = sprite.sprite.source.y - height_difference;
                     }
 

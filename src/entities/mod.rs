@@ -1,7 +1,6 @@
-use coffee::graphics::Window;
-use coffee::load::{Task};
+// use coffee::load::{Task};
 
-use specs::{Builder, Entity, World, WorldExt, LazyUpdate};
+use specs::{Builder, Entity, World, LazyUpdate};
 
 use serde::Deserialize;
 
@@ -11,13 +10,14 @@ use std::marker::PhantomData;
 
 use crate::components::{ComponentLoader, ComponentMux};
 use crate::load::{load_json, LoadError, build_task_error, load_deserializable_from_file};
-use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityLoadComponentError, EntityLoaderDeserializeError, EntityWorldRWLockError};
+use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityLoadComponentError, EntityLoaderDeserializeError};
 
 use thiserror::Error;
 
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, error};
 use specs::world::EntitiesRes;
+use crate::loading::{Task};
 
 pub mod player;
 pub mod textbox;
@@ -55,7 +55,7 @@ impl<T: ComponentMux> EntityLoader<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
-    pub fn load_entity(&mut self, ecs: Arc<RwLock<World>>, window: &Window) -> Task<Entity> {
+    pub fn load_entity(&mut self, ecs: &mut World) -> Task<Entity> {
         #[cfg(feature="trace")]
         trace!("ENTER: EntityLoader::load_entity");
 
@@ -66,8 +66,7 @@ impl<T: ComponentMux> EntityLoader<T> {
                     EntityLoaderDeserializeError {
                         file_path: self.entity_file.to_string(),
                         source: e
-                    },
-                    ErrorKind::InvalidData
+                    }
                 )
             }
         );
@@ -82,8 +81,7 @@ impl<T: ComponentMux> EntityLoader<T> {
                             file: component_path.clone(),
                             var_name: stringify!(component_path).to_string(),
                             source: e
-                        },
-                        ErrorKind::InvalidData
+                        }
                     )
                 }
             );
@@ -98,42 +96,40 @@ impl<T: ComponentMux> EntityLoader<T> {
                         EntityComponentLoaderError {
                                 component_path,
                                 source: e
-                            },
-                        ErrorKind::InvalidData
+                            }
                     )
                 }
             ));
         }
         // Must clone to appease compiler, so mutable ref to ecs is not dropped before the entity is built.
-        let read_ecs = map_err_return!(
-            ecs.read(),
-            |e| {
-                build_task_error(
-                    EntityWorldRWLockError {
-                        var_name: stringify!(ecs).to_string(),
-                        source_string: format!("{}", e)
-                    },
-                    ErrorKind::NotFound
-                )
-            }
-        );
+        // let read_ecs = map_err_return!(
+        //     ecs.read(),
+        //     |e| {
+        //         build_task_error(
+        //             EntityWorldRWLockError {
+        //                 var_name: stringify!(ecs).to_string(),
+        //                 source_string: format!("{}", e)
+        //             },
+        //             ErrorKind::NotFound
+        //         )
+        //     }
+        // );
 
         #[cfg(feature="trace")]
         trace!("Successfully grabbed read lock for World");
 
-        let entities = read_ecs.fetch::<EntitiesRes>();
-        let lazy_update = read_ecs.fetch::<LazyUpdate>();
+        let entities = ecs.fetch::<EntitiesRes>();
+        let lazy_update = ecs.fetch::<LazyUpdate>();
         let mut builder = lazy_update.create_entity(&entities);
 
         for component_loader in &self.component_loaders {
             builder = map_err_return!(
-                component_loader.load_component(builder, &read_ecs, window),
+                component_loader.load_component(builder, ecs),
                 |e| {
                     build_task_error(
                         EntityLoadComponentError {
                             source: e
-                        },
-                        ErrorKind::InvalidData
+                        }
                     )
                 }
             );
@@ -150,7 +146,7 @@ impl<T: ComponentMux> EntityLoader<T> {
         #[cfg(feature="trace")]
         trace!("EXIT: EntityLoader::load_entity");
 
-        Task::new(move || { Ok(
+        Task::new(move |_| { Ok(
             entity
         )})
     }

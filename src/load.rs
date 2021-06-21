@@ -1,7 +1,6 @@
 use serde_json::{Value, from_str, from_value};
 use serde::Deserialize;
 
-use std::io::ErrorKind;
 use std::fs::read_to_string;
 use std::error::Error;
 use std::sync::{RwLock, Arc};
@@ -9,7 +8,6 @@ use std::sync::{RwLock, Arc};
 use thiserror::Error;
 
 use coffee::graphics::Window;
-use coffee::load::{Task, Join};
 
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, debug};
@@ -20,6 +18,7 @@ use crate::entities::{EntityLoader};
 use crate::load::LoadError::{JSONLoadConversionError, ValueConversionError, ReadError, LoadIDError, DeserializationError};
 use crate::components::ComponentMux;
 use std::fmt::Debug;
+use crate::loading::{Task};
 
 pub(crate) const LOAD_PATH: &str = "assets/JSON/";
 pub(crate) const JSON_FILE: &str = ".json";
@@ -80,12 +79,13 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
 }
 
 #[cfg_attr(feature="trace", instrument)]
-pub fn build_task_error<T>(error: impl Error + Sync + Send + 'static, error_kind: ErrorKind) -> Task<T> {
+pub fn build_task_error<T: 'static>(error: impl Error + Send + Sync + 'static) -> Task<T> {
     #[cfg(feature="trace")]
     trace!("ENTER: build_task_error");
 
-    let task = Task::new(move || { Err(
-        coffee::Error::IO(std::io::Error::new(error_kind, error))
+    let task = Task::new(|_| { Err(
+        // coffee::Error::IO(std::io::Error::new(error_kind, error))
+        anyhow::Error::new(error)
     )});
 
     #[cfg(feature="trace")]
@@ -95,23 +95,17 @@ pub fn build_task_error<T>(error: impl Error + Sync + Send + 'static, error_kind
 }
 
 #[cfg_attr(feature="trace", instrument(skip(ecs, window)))]
-pub fn load_entity_vec<T: ComponentMux>(entity_paths: &Vec<String>, ecs: Arc<RwLock<World>>, window: &Window) -> Task<Vec<Entity>> {
-    let mut entity_task = Task::new(|| {Ok(
+pub fn load_entity_vec<T: ComponentMux + 'static>(entity_paths: &Vec<String>, ecs: &mut World) -> Task<Vec<Entity>> {
+    let mut entity_task = Task::new(|_| {Ok(
         Vec::new()
     )});
 
     for entity_path in entity_paths {
         let mut entity_loader = EntityLoader::<T>::new(entity_path.to_string());
-
-        entity_task = (
-                entity_loader.load_entity(ecs.clone(), window),
-                entity_task
-            )
-            .join()
-            .map(|(entity, mut entity_vec)| {
-                entity_vec.push(entity);
-                return entity_vec
-            });
+        entity_task = entity_task.join(entity_loader.load_entity(ecs), |(mut entity_vec, entity)| {
+            entity_vec.push(entity);
+            entity_vec
+        })
     }
 
     return entity_task

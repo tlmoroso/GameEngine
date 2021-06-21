@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 
 use coffee::graphics::Image;
-use coffee::load::{Task, Join};
 
 use crate::load::{LoadError, load_deserializable_from_file, build_task_error};
 use self::ImageDictError::ImageDictFileLoadError;
@@ -13,6 +12,7 @@ use self::ImageDictError::ImageDictFileLoadError;
 use serde::Deserialize;
 
 use thiserror::Error;
+use crate::loading::Task;
 
 pub const IMAGE_DICT_LOAD_ID: &str = "image_dict";
 
@@ -59,8 +59,7 @@ impl ImageDictLoader {
                     path: self.path,
                     var_name: stringify!(self.path).to_string(),
                     source: e
-                },
-                ErrorKind::InvalidData
+                }
             )}
         );
 
@@ -71,15 +70,16 @@ impl ImageDictLoader {
             #[cfg(feature="trace")]
             trace!("Adding {:#?} at {:#?} to ImageDict", image_name.clone(), image_path.clone());
 
-            image_task = (
-                Image::load(image_path),
-                image_task
-            )
-                .join()
-                .map(|(image, mut image_dict)| {
-                    image_dict.insert(image_name, image);
-                    return image_dict
-                })
+            // image_task.join()
+            // image_task = (
+            //     Image::load(image_path),
+            //     image_task
+            // )
+            //     .join()
+            //     .map(|(image, mut image_dict)| {
+            //         image_dict.insert(image_name, image);
+            //         return image_dict
+            //     })
         }
 
         let task = image_task.map(|image_dict| {

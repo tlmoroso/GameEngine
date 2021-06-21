@@ -1,11 +1,8 @@
-pub mod drawables;
-pub mod audibles;
+// pub mod drawables;
+// pub mod audibles;
 
-use specs::{World, EntityBuilder, Component};
+use specs::{World};
 
-use coffee::graphics::Window;
-
-use std::sync::{Arc, RwLock};
 use std::fmt::{Debug};
 
 use anyhow::Result;
@@ -17,7 +14,7 @@ pub const COMPONENTS_DIR: &str = "components/";
 
 pub trait ComponentLoader: Debug {
     fn from_json(json: JSONLoad) -> Result<Self> where Self: Sized;
-    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: &World, window: &Window) -> Result<LazyBuilder<'a>>;
+    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: &World) -> Result<LazyBuilder<'a>>;
     fn set_value(&mut self, new_value: JSONLoad) -> Result<()>;
     fn get_component_name(&self) -> String;
 }
