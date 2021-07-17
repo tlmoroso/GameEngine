@@ -73,7 +73,7 @@ impl Input for Mouse {
 
     fn update(&mut self, event: WindowEvent) {
         match event {
-            WindowEvent::Focus(isFocused) => self.is_cursor_owned = isFocused,
+            WindowEvent::Focus(is_focused) => self.is_cursor_owned = is_focused,
             WindowEvent::CursorEnter(entered) => self.is_cursor_within_window = entered,
             WindowEvent::MouseButton(button, action, modifiers) => {
                 match action {

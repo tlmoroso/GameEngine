@@ -8,10 +8,10 @@ use crate::load::LoadError::LoadIDError;
 use crate::globals::image_dict::ImageDict;
 use serde::Deserialize;
 
-pub const SPRITE_LOAD_ID: &str = "sprite";
+pub const SPRITE_LOAD_ID: &str = "texture";
 
 pub struct Sprite {
-    pub sprite: CoffeeSprite,
+    pub sprite: Sprite,
     pub image: String
 }
 

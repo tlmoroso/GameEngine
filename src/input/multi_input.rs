@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use crate::input::Input;
 use glfw::WindowEvent;
 
+#[derive(Debug, Clone)]
 pub struct MultiInput {
     mouse: Mouse,
     keyboard: KeyBoard,

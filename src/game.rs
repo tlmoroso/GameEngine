@@ -1,9 +1,9 @@
-use specs::{World};
+use specs::{World, WorldExt};
 
-use crate::scenes::scene_stack::{SceneStack, SceneStackError};
+use crate::scenes::scene_stack::{SceneStack, SceneStackError, SceneStackLoader, SCENE_STACK_FILE_ID};
 
 use std::marker::PhantomData;
-use std::sync::{RwLock, Arc};
+use std::sync::{RwLock, Arc, Mutex};
 
 use thiserror::Error;
 
@@ -12,55 +12,65 @@ use tracing::{instrument, error, trace};
 use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError, GameIsFinishedError};
 use std::fmt::Debug;
 use crate::input::Input;
-use crate::loading::Task;
+use crate::loading::DrawTask;
+use luminance_glfw::GL33Context;
+use anyhow::Result;
+use std::borrow::BorrowMut;
+use std::ops::DerefMut;
+use crate::load::{LOAD_PATH, JSON_FILE};
+use crate::scenes::SCENES_DIR;
 
 pub const GAME_FILE_ID: &str = "game";
 
 pub trait GameWrapper<T: Input + Debug> {
     fn register_components(ecs: &mut World);
     // Allow user to pre-fill World with global values here
-    fn load() -> Task<()>;
+    fn load() -> DrawTask<SceneStack<T>>;
     // fn load_scene_stack(ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>>;
 }
 
-pub struct Game<T: GameWrapper<U>, U: Input + Debug> {
+pub struct Game<T: GameWrapper<U>, U: 'static + Input + Debug> {
     scene_stack: SceneStack<U>,
     phantom_wrapper: PhantomData<T>,
 }
 
-impl<T: GameWrapper<U>, U: Input + Debug + 'static> Game<T,U> {
+impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
     #[cfg_attr(feature="trace", instrument(skip(window)))]
-    pub(crate) fn load(ecs: &mut World) -> Game<T,U> {
+    pub(crate) fn load(ecs: Arc<RwLock<World>>, context: Arc<RwLock<GL33Context>>) -> Game<T,U> {
         #[cfg(feature="trace")]
         trace!("ENTER: Game::load");
-            // let task = T::load()
-            //     .map(|_, ecs| {
-                    // let mut write_ecs = ecs.write().expect("Error acquiring lock for ecs");
-        T::register_components(ecs);
-                    // write_ecs.maintain();
-                    // std::mem::drop(write_ecs);
-                // });
+        T::register_components(ecs.write().expect("Failed to lock World.").deref_mut());
+        eprintln!("Components registered");
+
+        let scene_stack = T::load()
+            .execute((ecs.clone(), context))
+            .expect("Failed to load SceneStack from GameWrapper");
+        eprintln!("Scene Stack loaded");
+
+        ecs.write()
+           .expect("Failed to lock World")
+           .maintain();
+        eprintln!("World maintained");
+
         #[cfg(feature="trace")]
         trace!("EXIT: MyGame::load");
         Game {
             scene_stack,
             phantom_wrapper: PhantomData,
         }
-        // return task
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, frame, timer)))]
-    pub(crate) fn draw(&mut self, ecs: &mut World) {
+    pub(crate) fn draw(&mut self, ecs: &mut World, context: &mut GL33Context) {
         #[cfg(feature="trace")]
         trace!("ENTER: MyGame::draw");
 
-        // frame.clear(Color::BLACK);
-        let result = self.scene_stack.draw(ecs);
+        let result = self.scene_stack.draw(ecs, context);
         if let Err(e) = result {
             #[cfg(feature="trace")]
             error!("ERROR: Game failed during draw function:\n{:#?}", e);
 
-            panic!(GameDrawError { source: e })
+            panic!("{:?}", GameDrawError { source: e })
         }
 
         #[cfg(feature="trace")]
@@ -77,7 +87,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> Game<T,U> {
             #[cfg(feature="trace")]
             error!("ERROR: Game failed during interact function:\n{:#?}", e);
 
-            panic!(GameInteractError { source: e })
+            panic!("{:?}", GameInteractError { source: e })
         }
         #[cfg(feature="trace")]
         trace!("EXIT: MyGame::interact")
@@ -93,7 +103,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> Game<T,U> {
             #[cfg(feature="trace")]
             error!("ERROR: Game failed during update function:\n{:#?}", e);
 
-            panic!(GameUpdateError { source: e })
+            panic!("{:?}", GameUpdateError { source: e })
         }
 
         #[cfg(feature="trace")]

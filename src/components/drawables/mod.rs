@@ -68,12 +68,12 @@ impl ComponentLoader for DrawableLoader {
             Some(sprites.iter().map(|sprite_json| {
                 if let Some(loader) = &mut sprite_loader {
                     loader.sprite_json = sprite_json.clone();
-                    loader.build_sprite(ecs).expect(format!("ERROR: failed to build sprite from json: {:#?}", sprite_json).as_str())
+                    loader.build_sprite(ecs).expect(format!("ERROR: failed to build texture from json: {:#?}", sprite_json).as_str())
                 } else {
                     let loader = SpriteLoader {
                         sprite_json: sprite_json.clone()
                     };
-                    let sprite = loader.build_sprite(ecs).expect(format!("ERROR: failed to build sprite from json: {:#?}", sprite_json).as_str());
+                    let sprite = loader.build_sprite(ecs).expect(format!("ERROR: failed to build texture from json: {:#?}", sprite_json).as_str());
                     sprite_loader = Some(loader);
                     return sprite
                 }
@@ -86,12 +86,12 @@ impl ComponentLoader for DrawableLoader {
             Some(sprites.iter().map(|sprite_json| {
                 if let Some(loader) = &mut sprite_loader {
                     loader.sprite_json = sprite_json.clone();
-                    loader.build_sprite(ecs).expect(format!("ERROR: failed to build animated sprite from json: {:#?}", sprite_json).as_str())
+                    loader.build_sprite(ecs).expect(format!("ERROR: failed to build animated texture from json: {:#?}", sprite_json).as_str())
                 } else {
                     let loader = AnimatedSpriteLoader {
                         sprite_json: sprite_json.clone()
                     };
-                    let sprite = loader.build_sprite(ecs).expect(format!("ERROR: failed to build animated sprite from json: {:#?}", sprite_json).as_str());
+                    let sprite = loader.build_sprite(ecs).expect(format!("ERROR: failed to build animated texture from json: {:#?}", sprite_json).as_str());
                     sprite_loader = Some(loader);
                     return sprite
                 }

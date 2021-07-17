@@ -1,23 +1,26 @@
 // use coffee::load::{Task};
 
-use specs::{Builder, Entity, World, LazyUpdate};
+use specs::{Builder, Entity, LazyUpdate, World};
 
 use serde::Deserialize;
 
-use std::io::ErrorKind;
 use std::sync::{Arc, RwLock};
 use std::marker::PhantomData;
 
 use crate::components::{ComponentLoader, ComponentMux};
-use crate::load::{load_json, LoadError, build_task_error, load_deserializable_from_file};
-use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityLoadComponentError, EntityLoaderDeserializeError};
+use crate::load::{load_json, LoadError, load_deserializable_from_file, JSONLoad};
+// use crate::entities::EntityError::{EntityFileLoadError, EntityComponentLoaderError, EntityLoadComponentError, EntityLoaderDeserializeError};
 
 use thiserror::Error;
+
+use anyhow::Result;
 
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, error};
 use specs::world::EntitiesRes;
-use crate::loading::{Task};
+use crate::loading::DrawTask;
+use luminance_glfw::GL33Context;
+use std::borrow::BorrowMut;
 
 pub mod player;
 pub mod textbox;
@@ -30,13 +33,11 @@ pub(crate) struct EntityLoaderJSON {
     component_paths: Vec<String>
 }
 
-pub struct EntityLoader<T: ComponentMux> {
+pub struct EntityLoader {
     entity_file: String,
-    component_loaders: Vec<Box<dyn ComponentLoader>>,
-    phantom: PhantomData<T>,
 }
 
-impl<T: ComponentMux> EntityLoader<T> {
+impl EntityLoader {
     #[cfg_attr(feature="trace", instrument)]
     pub fn new(file_path: String) -> Self {
         #[cfg(feature="trace")]
@@ -44,8 +45,6 @@ impl<T: ComponentMux> EntityLoader<T> {
 
         let new = Self {
             entity_file: file_path,
-            component_loaders: Vec::new(),
-            phantom: PhantomData,
         };
 
         #[cfg(feature="trace")]
@@ -55,100 +54,30 @@ impl<T: ComponentMux> EntityLoader<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
-    pub fn load_entity(&mut self, ecs: &mut World) -> Task<Entity> {
-        #[cfg(feature="trace")]
-        trace!("ENTER: EntityLoader::load_entity");
+    pub fn load_entity<T: ComponentMux>(&self) -> DrawTask<Entity> {
+        let file_path = self.entity_file.clone();    // Attempt to not have self in the closure
 
-        let entity_loader_json: EntityLoaderJSON = map_err_return!(
-            load_deserializable_from_file(&self.entity_file, ENTITY_LOADER_FILE_ID),
-            |e| {
-                build_task_error(
-                    EntityLoaderDeserializeError {
-                        file_path: self.entity_file.to_string(),
-                        source: e
-                    }
-                )
+        DrawTask::new(move |(world, context)| {
+            let entity_json: EntityLoaderJSON = load_deserializable_from_file(&file_path, ENTITY_LOADER_FILE_ID)?;
+
+            let ecs = world.read().expect("Failed to lock World");
+
+            let lazy_update = ecs.fetch::<LazyUpdate>();
+            let entities = ecs.fetch::<EntitiesRes>();
+
+            let mut builder = lazy_update.create_entity(&entities);
+
+            for component_path in entity_json.component_paths {
+                eprintln!("Loading component: {:?}", component_path.clone());
+                let json = load_json(&component_path)?;
+                let loader = T::map_json_to_loader(json)?;
+
+                builder = loader.load_component(builder, world.clone(), Some(context.clone()))?;
+                eprintln!("component loaded");
             }
-        );
-        
-        for component_path in entity_loader_json.component_paths {
-            println!("Component Path: {:?}", component_path);
-            let json_value = map_err_return!(
-                load_json(&component_path),
-                |e| {
-                    build_task_error(
-                        EntityFileLoadError {
-                            file: component_path.clone(),
-                            var_name: stringify!(component_path).to_string(),
-                            source: e
-                        }
-                    )
-                }
-            );
 
-            #[cfg(feature="trace")]
-            trace!("Value: {:#?} loaded from: {:#?}", json_value, component_path);
-
-            self.component_loaders.push( map_err_return!(
-                T::map_json_to_loader(json_value),
-                |e| {
-                    build_task_error(
-                        EntityComponentLoaderError {
-                                component_path,
-                                source: e
-                            }
-                    )
-                }
-            ));
-        }
-        // Must clone to appease compiler, so mutable ref to ecs is not dropped before the entity is built.
-        // let read_ecs = map_err_return!(
-        //     ecs.read(),
-        //     |e| {
-        //         build_task_error(
-        //             EntityWorldRWLockError {
-        //                 var_name: stringify!(ecs).to_string(),
-        //                 source_string: format!("{}", e)
-        //             },
-        //             ErrorKind::NotFound
-        //         )
-        //     }
-        // );
-
-        #[cfg(feature="trace")]
-        trace!("Successfully grabbed read lock for World");
-
-        let entities = ecs.fetch::<EntitiesRes>();
-        let lazy_update = ecs.fetch::<LazyUpdate>();
-        let mut builder = lazy_update.create_entity(&entities);
-
-        for component_loader in &self.component_loaders {
-            builder = map_err_return!(
-                component_loader.load_component(builder, ecs),
-                |e| {
-                    build_task_error(
-                        EntityLoadComponentError {
-                            source: e
-                        }
-                    )
-                }
-            );
-
-            #[cfg(feature="trace")]
-            trace!("Added: {} to entity", component_loader.get_component_name());
-        }
-
-        let entity = builder.build();
-
-        #[cfg(feature="trace")]
-        trace!("Entity: {:#?} built", entity);
-
-        #[cfg(feature="trace")]
-        trace!("EXIT: EntityLoader::load_entity");
-
-        Task::new(move |_| { Ok(
-            entity
-        )})
+            Ok(builder.build())
+        })
     }
 }
 

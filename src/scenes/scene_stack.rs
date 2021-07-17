@@ -1,12 +1,9 @@
 use crate::scenes::{Scene, SceneLoader};
 use crate::scenes::scene_stack::SceneStackError::{SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError, SceneStackIsFinishedError, SceneStackDeserializationError, SceneStackFactoryError};
-use crate::load::{load_json, JSONLoad, LoadError, build_task_error, load_deserializable_from_file};
+use crate::load::{load_json, JSONLoad, LoadError, load_deserializable_from_file};
 
-use specs::{World};
+use specs::World;
 
-// use coffee::load::{Task, Join};
-
-use std::io::ErrorKind;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 use std::cmp::{min, max};
@@ -22,7 +19,8 @@ use anyhow::Result;
 use tracing::{instrument, trace, error};
 
 use crate::input::Input;
-use crate::loading::{Task};
+use crate::loading::DrawTask;
+use luminance_glfw::GL33Context;
 
 pub const SCENE_STACK_FILE_ID: &str = "scene_stack";
 
@@ -46,7 +44,7 @@ struct SceneStackLoaderJSON {
     scene_paths: Vec<String>
 }
 
-impl<T: Input + Debug + 'static> SceneStackLoader<T> {
+impl<T: 'static + Input + Debug> SceneStackLoader<T> {
     #[cfg_attr(feature="trace", instrument)]
     pub fn new(file_path: String, scene_factory: fn(JSONLoad) -> Result<Box<dyn SceneLoader<T>>>) -> Self {
         #[cfg(feature="trace")]
@@ -64,68 +62,27 @@ impl<T: Input + Debug + 'static> SceneStackLoader<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self,ecs, window)))]
-    pub fn load(self, ecs: &mut World) -> Task<SceneStack<T>> {
-        #[cfg(feature="trace")]
-        trace!("ENTER: SceneStackLoader::load");
+    pub fn load(&self) -> DrawTask<SceneStack<T>> {
+        let path = self.scene_stack_file.clone();
+        let scene_factory = self.scene_factory;
+        DrawTask::new(move |(ecs, context)| {
+            let scene_stack_json: SceneStackLoaderJSON = load_deserializable_from_file(&path, SCENE_STACK_FILE_ID)?;
+            let mut scene_vec = Vec::new();
 
-        let scene_stack_loader: SceneStackLoaderJSON = map_err_return!(
-            load_deserializable_from_file(&self.scene_stack_file, SCENE_STACK_FILE_ID),
-            |e| {
-                build_task_error(
-                    SceneStackDeserializationError {
-                        path: self.scene_stack_file,
-                        source: e
-                    }
-                )
+            for scene_path in scene_stack_json.scene_paths {
+                eprintln!("loading scene {:?}", scene_path.clone());
+                let scene_value = load_json(&scene_path)?;
+                let scene_loader = (scene_factory)(scene_value)?;
+                let scene = scene_loader.load_scene().execute((ecs.clone(), context.clone()))?;
+                scene_vec.push(scene);
+                eprintln!("scene loaded")
             }
-        );
 
-        #[cfg(feature="trace")]
-        trace!("Value: {} successfully transformed into SceneStackLoaderJSON", json_value.actual_value);
-
-        let mut scene_task = Task::new(|_| {Ok(
-            Vec::new()
-        )});
-
-        for scene_path in scene_stack_loader.scene_paths {
-            let scene_value = map_err_return!(
-                load_json(&scene_path),
-                |e| { build_task_error(
-                    SceneStackDeserializationError {
-                        path: scene_path.clone(),
-                        source: e
-                    }
-                )}
-            );
-            #[cfg(feature="trace")]
-            trace!("Scene: {:#?} successfully loaded from: {:#?}", scene_value, scene_path);
-
-            let scene_loader = map_err_return!(
-                (self.scene_factory)(scene_value.clone()),
-                |e| { build_task_error(
-                    SceneStackFactoryError {
-                        scene_value: scene_value,
-                        source: e
-                    }
-                )}
-            );
-
-            scene_task = scene_loader.load_scene(ecs)
-                .join(scene_task, |(scene, mut scene_vec)|{
-                    scene_vec.push(scene);
-                    return scene_vec
-                });
-        }
-
-        let task = scene_task.map(|scene_vec,_| {
             Ok(SceneStack {
                 stack: scene_vec,
-                phantom_input: PhantomData
+                phantom_input: PhantomData::default()
             })
-        });
-        #[cfg(feature="trace")]
-        trace!("EXIT: SceneStackLoader::load");
-        return task
+        })
     }
 }
 
@@ -238,7 +195,7 @@ impl<T: Input + Debug> SceneStack<T> {
                     let stack_height = self.stack.len();
                     // Only call pop length - 1 times so one scene is left.
                     for i in 0..stack_height - 1 {
-                       let deleted_scene = self.stack
+                       let _deleted_scene = self.stack
                            .pop()
                            .ok_or_else(
                                || {
@@ -254,7 +211,7 @@ impl<T: Input + Debug> SceneStack<T> {
                            )?;
 
                        #[cfg(feature="trace")]
-                       trace!("Clearing stack... Deleted: {} ({}/{})", deleted_scene.get_name(), i + 1, stack_height - 1);
+                       trace!("Clearing stack... Deleted: {} ({}/{})", _deleted_scene.get_name(), i + 1, stack_height - 1);
                     }
                     let _remaining_scene = self.stack
                         .first()
@@ -284,13 +241,13 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, frame, timer)))]
-    pub fn draw(&mut self, ecs: &mut World) -> Result<(), SceneStackError> {
+    pub fn draw(&mut self, ecs: &mut World, context: &mut GL33Context) -> Result<(), SceneStackError> {
 
         #[cfg(feature="trace")]
         trace!("ENTER: SceneStack::draw");
 
         return if let Some(scene) = self.stack.last_mut() {
-            scene.draw(ecs)
+            scene.draw(ecs, context)
                 .map_err( |e| {
                     SceneStackDrawError {
                         scene_name: scene.get_name(),

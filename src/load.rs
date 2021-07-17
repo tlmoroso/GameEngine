@@ -7,8 +7,6 @@ use std::sync::{RwLock, Arc};
 
 use thiserror::Error;
 
-use coffee::graphics::Window;
-
 #[cfg(feature="trace")]
 use tracing::{instrument, trace, debug};
 
@@ -18,12 +16,12 @@ use crate::entities::{EntityLoader};
 use crate::load::LoadError::{JSONLoadConversionError, ValueConversionError, ReadError, LoadIDError, DeserializationError};
 use crate::components::ComponentMux;
 use std::fmt::Debug;
-use crate::loading::{Task};
+use crate::loading::{Task, DrawTask};
 
-pub(crate) const LOAD_PATH: &str = "assets/JSON/";
-pub(crate) const JSON_FILE: &str = ".json";
+pub const LOAD_PATH: &str = "assets/JSON/";
+pub const JSON_FILE: &str = ".json";
 
-pub(crate) const ENTITY_VEC_LOAD_ID: &str = "entity_vec";
+pub const ENTITY_VEC_LOAD_ID: &str = "entity_vec";
 
 #[macro_export]
 macro_rules! map_err_return {
@@ -78,34 +76,38 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
     return load_json;
 }
 
-#[cfg_attr(feature="trace", instrument)]
-pub fn build_task_error<T: 'static>(error: impl Error + Send + Sync + 'static) -> Task<T> {
-    #[cfg(feature="trace")]
-    trace!("ENTER: build_task_error");
-
-    let task = Task::new(|_| { Err(
-        // coffee::Error::IO(std::io::Error::new(error_kind, error))
-        anyhow::Error::new(error)
-    )});
-
-    #[cfg(feature="trace")]
-    trace!("EXIT: build_task_error");
-
-    return task
-}
+// #[cfg_attr(feature="trace", instrument)]
+// pub fn build_task_error<T: 'static>(error: impl Error + Send + Sync + 'static) -> Task<T> {
+//     #[cfg(feature="trace")]
+//     trace!("ENTER: build_task_error");
+//
+//     let task = Task::new(|_| { Err(
+//         // coffee::Error::IO(std::io::Error::new(error_kind, error))
+//         anyhow::Error::new(error)
+//     )});
+//
+//     #[cfg(feature="trace")]
+//     trace!("EXIT: build_task_error");
+//
+//     return task
+// }
 
 #[cfg_attr(feature="trace", instrument(skip(ecs, window)))]
-pub fn load_entity_vec<T: ComponentMux + 'static>(entity_paths: &Vec<String>, ecs: &mut World) -> Task<Vec<Entity>> {
-    let mut entity_task = Task::new(|_| {Ok(
+pub fn load_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>) -> DrawTask<Vec<Entity>> {
+    let mut entity_task = DrawTask::new(|(_ecs, _context)| {Ok(
         Vec::new()
     )});
 
     for entity_path in entity_paths {
-        let mut entity_loader = EntityLoader::<T>::new(entity_path.to_string());
-        entity_task = entity_task.join(entity_loader.load_entity(ecs), |(mut entity_vec, entity)| {
+        eprintln!("Loading entity: {:?}", entity_path.clone());
+        let path = entity_path.clone();
+        let entity_loader = EntityLoader::new(path);
+        let other = entity_loader.load_entity::<T>();
+        entity_task = entity_task.join(other, |(mut entity_vec, entity)| {
             entity_vec.push(entity);
             entity_vec
-        })
+        });
+        eprintln!("entity loaded");
     }
 
     return entity_task
@@ -146,19 +148,19 @@ pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de>>(file_path: &s
 }
 
 #[cfg_attr(feature="trace", instrument)]
-pub fn load_deserializable_from_json<T: for<'de> Deserialize<'de>>(json: JSONLoad, load_id: &str) -> Result<T, LoadError> {
+pub fn load_deserializable_from_json<T: for<'de> Deserialize<'de>>(json: &JSONLoad, load_id: &str) -> Result<T, LoadError> {
     return if json.load_type_id == load_id {
         from_value::<T>(json.actual_value.clone())
             .map_err(|e| {
                 JSONLoadConversionError {
-                    value: json.actual_value,
+                    value: json.actual_value.clone(),
                     source: e
                 }
             })
     } else {
         Err(
             LoadIDError {
-                actual: json.load_type_id,
+                actual: json.load_type_id.clone(),
                 expected: load_id.to_string()
             }
         )
