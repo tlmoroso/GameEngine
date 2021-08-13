@@ -8,7 +8,7 @@ use std::sync::{RwLock, Arc};
 use thiserror::Error;
 
 #[cfg(feature="trace")]
-use tracing::{instrument, trace, debug};
+use tracing::{instrument, trace, debug, error};
 
 use specs::{World, Entity};
 
@@ -46,24 +46,36 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
 
     let json_string = read_to_string(file_path)
         .map_err(|e| {
+            #[cfg(feature = "trace")]
+            error!("Something went wrong while reading in json from file: {:?}", file_path.clone());
+
             ReadError {
                 path: file_path.to_string(), source: e
             }
         })?;
 
     #[cfg(feature="trace")]
-    debug!("Successfully loaded file into string from: {}", file_path);
+    debug!("Successfully loaded file into string from: {:?}", file_path.clone());
 
     let json_value = from_str::<Value>(json_string.as_str())
         .map_err(|e| {
+            #[cfg(feature = "trace")]
+            error!("Error converting json string: ({:?}) into serde_json Value.", json_string.clone());
+
             ValueConversionError {
-                string_value: json_string,
+                string_value: json_string.clone(),
                 source: e
             }
         })?;
 
+    #[cfg(feature = "trace")]
+    debug!("JSON string: ({:?}) from file translated into serde_json value: {:?}", json_string.clone(), json_value.clone());
+
     let load_json = from_value(json_value.clone())
         .map_err(|e| {
+            #[cfg(feature = "trace")]
+            error!("Error occurred while converting serde_json Value into JSONLoad object");
+
             JSONLoadConversionError {
                 value: json_value,
                 source: e
@@ -71,59 +83,61 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
         });
 
     #[cfg(feature="trace")]
-    trace!("EXIT: load_json");
+    debug!("EXIT: load_json. value: {:?}", load_json);
 
     return load_json;
 }
 
-// #[cfg_attr(feature="trace", instrument)]
-// pub fn build_task_error<T: 'static>(error: impl Error + Send + Sync + 'static) -> Task<T> {
-//     #[cfg(feature="trace")]
-//     trace!("ENTER: build_task_error");
-//
-//     let task = Task::new(|_| { Err(
-//         // coffee::Error::IO(std::io::Error::new(error_kind, error))
-//         anyhow::Error::new(error)
-//     )});
-//
-//     #[cfg(feature="trace")]
-//     trace!("EXIT: build_task_error");
-//
-//     return task
-// }
-
-#[cfg_attr(feature="trace", instrument(skip(ecs, window)))]
+#[cfg_attr(feature="trace", instrument)]
 pub fn load_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>) -> DrawTask<Vec<Entity>> {
+    #[cfg(feature = "trace")]
+    debug!("ENTER: load_entity_vec");
+
     let mut entity_task = DrawTask::new(|(_ecs, _context)| {Ok(
         Vec::new()
     )});
 
     for entity_path in entity_paths {
-        eprintln!("Loading entity: {:?}", entity_path.clone());
+        #[cfg(feature = "trace")]
+        debug!("Loading entity from: {:?}", entity_path.clone());
+
         let path = entity_path.clone();
         let entity_loader = EntityLoader::new(path);
         let other = entity_loader.load_entity::<T>();
+        #[cfg(feature = "trace")]
+        debug!("Entity Task created");
+
         entity_task = entity_task.join(other, |(mut entity_vec, entity)| {
             entity_vec.push(entity);
             entity_vec
         });
-        eprintln!("entity loaded");
+        #[cfg(feature = "trace")]
+        debug!("Entity appended to vec");
     }
+
+    #[cfg(feature = "trace")]
+    debug!("EXIT: load_entity_vec");
 
     return entity_task
 }
 
 #[cfg_attr(feature="trace", instrument)]
-pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de>>(file_path: &str, file_id: &str) -> Result<T, LoadError> {
-    #[cfg(feature="trace")]
-    trace!("ENTER: load_deserializable_from_file");
+pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de> + Debug>(file_path: &str, file_id: &str) -> Result<T, LoadError> {
+    let json_value = load_json(file_path)
+        .map_err(|e| {
+            #[cfg(feature = "trace")]
+            error!("Something went wrong while loading a JSONLoad object from file. Path: ({:?}). ID: {:?}", file_path.clone(), file_id.clone());
 
-    let json_value = load_json(file_path)?;
+            return e
+        })?;
 
     #[cfg(feature="trace")]
-    trace!("Successfully loaded JSONLoad: {:#?} from: {:#?}", json_value, file_path.to_string());
+    debug!("Successfully loaded JSONLoad: ({:?}) from: {:?}", json_value.clone(), file_path.clone());
 
     if json_value.load_type_id != file_id {
+        #[cfg(feature = "trace")]
+        error!("Type ID: ({:?}) of loaded object does not match given type ID: {:?}", json_value.load_type_id.clone(), file_id.clone());
+
         return Err( LoadIDError {
                 actual: json_value.load_type_id,
                 expected: file_id.to_string(),
@@ -131,18 +145,18 @@ pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de>>(file_path: &s
     }
 
     #[cfg(feature="trace")]
-    trace!("Load ID: {} matched given file ID", json_value.load_type_id);
+    debug!("Load ID: ({:?}) matched given file ID: {:?}", json_value.load_type_id.clone(), file_id.clone());
 
     let deserialized_value: Result<T, LoadError> = from_value(json_value.actual_value.clone())
         .map_err(|e| {
+            #[cfg(feature = "trace")]
+            error!("Failed to convert generic JSONLoad object: ({:?}) into specific type", json_value.clone());
+
             DeserializationError {
                 value: json_value.actual_value,
                 source: e
             }
         });
-
-    #[cfg(feature="trace")]
-    trace!("EXIT: load_deserializable_from_file");
 
     return deserialized_value
 }
@@ -152,12 +166,18 @@ pub fn load_deserializable_from_json<T: for<'de> Deserialize<'de>>(json: &JSONLo
     return if json.load_type_id == load_id {
         from_value::<T>(json.actual_value.clone())
             .map_err(|e| {
+                #[cfg(feature = "trace")]
+                error!("Failed to convert json load object: ({:?}) into given type", json.clone());
+
                 JSONLoadConversionError {
                     value: json.actual_value.clone(),
                     source: e
                 }
             })
     } else {
+        #[cfg(feature = "trace")]
+        error!("Given load_id: ({:?}) did not match load_id of json object: {:?}", load_id.clone(), json.load_type_id.clone());
+
         Err(
             LoadIDError {
                 actual: json.load_type_id.clone(),

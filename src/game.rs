@@ -3,13 +3,14 @@ use specs::{World, WorldExt};
 use crate::scenes::scene_stack::{SceneStack, SceneStackError, SceneStackLoader, SCENE_STACK_FILE_ID};
 
 use std::marker::PhantomData;
-use std::sync::{RwLock, Arc, Mutex};
+use std::sync::{RwLock, Arc, Mutex, PoisonError, RwLockReadGuard, RwLockWriteGuard};
 
 use thiserror::Error;
 
 #[cfg(feature="trace")]
-use tracing::{instrument, error, trace};
-use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError, GameIsFinishedError};
+use tracing::{instrument, error, trace, debug};
+
+use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError, GameIsFinishedError, GameWrapperLoadError, WorldReadLockError, WorldWriteLockError};
 use std::fmt::Debug;
 use crate::input::Input;
 use crate::loading::DrawTask;
@@ -35,82 +36,98 @@ pub struct Game<T: GameWrapper<U>, U: 'static + Input + Debug> {
 }
 
 impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
-    #[cfg_attr(feature="trace", instrument(skip(window)))]
-    pub(crate) fn load(ecs: Arc<RwLock<World>>, context: Arc<RwLock<GL33Context>>) -> Game<T,U> {
+    #[cfg_attr(feature="trace", instrument(skip(ecs, context)))]
+    pub(crate) fn load(ecs: Arc<RwLock<World>>, context: Arc<RwLock<GL33Context>>) -> Result<Game<T,U>, GameError> {
         #[cfg(feature="trace")]
-        trace!("ENTER: Game::load");
-        T::register_components(ecs.write().expect("Failed to lock World.").deref_mut());
-        eprintln!("Components registered");
+        debug!("ENTER: Game::load");
+        T::register_components(
+            ecs.write()
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for World");
+
+                    WorldWriteLockError
+                })?
+                .deref_mut()
+        );
+        #[cfg(feature="trace")]
+        debug!("Components registered");
 
         let scene_stack = T::load()
             .execute((ecs.clone(), context))
-            .expect("Failed to load SceneStack from GameWrapper");
-        eprintln!("Scene Stack loaded");
+            .map_err(|e| { GameWrapperLoadError { source: e } })?;
+        #[cfg(feature="trace")]
+        debug!("SceneStack loaded from GameWrapper: {:?}", scene_stack);
 
         ecs.write()
-           .expect("Failed to lock World")
+           .map_err(|e| { WorldWriteLockError })?
            .maintain();
-        eprintln!("World maintained");
+        #[cfg(feature="trace")]
+        debug!("World maintained after loading");
 
         #[cfg(feature="trace")]
-        trace!("EXIT: MyGame::load");
-        Game {
+        debug!("EXIT: MyGame::load");
+        Ok(Game {
             scene_stack,
             phantom_wrapper: PhantomData,
-        }
+        })
     }
 
-    #[cfg_attr(feature="trace", instrument(skip(self, frame, timer)))]
-    pub(crate) fn draw(&mut self, ecs: &mut World, context: &mut GL33Context) {
+    #[cfg_attr(feature="trace", instrument(skip(self, ecs, context)))]
+    pub(crate) fn draw(&mut self, ecs: &mut World, context: &mut GL33Context) -> Result<(), GameError> {
         #[cfg(feature="trace")]
-        trace!("ENTER: MyGame::draw");
+        debug!("ENTER: MyGame::draw");
 
-        let result = self.scene_stack.draw(ecs, context);
-        if let Err(e) = result {
-            #[cfg(feature="trace")]
-            error!("ERROR: Game failed during draw function:\n{:#?}", e);
+         self.scene_stack.draw(ecs, context)
+             .map_err(|e| {
+                 #[cfg(feature="trace")]
+                 error!("ERROR: Game failed during draw function: {:?}", e);
 
-            panic!("{:?}", GameDrawError { source: e })
-        }
+                 GameDrawError { source: e }
+             })?;
 
         #[cfg(feature="trace")]
-        trace!("EXIT: MyGame::draw")
+        debug!("EXIT: MyGame::draw");
+        Ok(())
     }
 
-    #[cfg_attr(feature="trace", instrument(skip(self, window)))]
-    pub(crate) fn interact(&mut self, ecs: &mut World, input: &U) {
+    #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
+    pub(crate) fn interact(&mut self, ecs: &mut World, input: &U) -> Result<(), GameError> {
         #[cfg(feature="trace")]
-        trace!("ENTER: MyGame::interact");
+        debug!("ENTER: MyGame::interact");
 
-        let result = self.scene_stack.interact(ecs, input);
-        if let Err(e) = result {
-            #[cfg(feature="trace")]
-            error!("ERROR: Game failed during interact function:\n{:#?}", e);
+        self.scene_stack.interact(ecs, input)
+            .map_err(|e| {
+                #[cfg(feature="trace")]
+                error!("ERROR: Game failed during interact function: {:?}", e);
 
-            panic!("{:?}", GameInteractError { source: e })
-        }
+                GameInteractError { source: e }
+            })?;
+
         #[cfg(feature="trace")]
-        trace!("EXIT: MyGame::interact")
+        debug!("EXIT: MyGame::interact");
+        Ok(())
     }
 
-    #[cfg_attr(feature="trace", instrument(skip(self, _window)))]
-    pub(crate) fn update(&mut self, ecs: &mut World) {
+    #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
+    pub(crate) fn update(&mut self, ecs: &mut World) -> Result<(), GameError> {
         #[cfg(feature="trace")]
-        trace!("ENTER: MyGame::update");
+        debug!("ENTER: MyGame::update");
 
-        let result = self.scene_stack.update(ecs);
-        if let Err(e) = result {
-            #[cfg(feature="trace")]
-            error!("ERROR: Game failed during update function:\n{:#?}", e);
+        self.scene_stack.update(ecs)
+            .map_err(|e| {
+                #[cfg(feature="trace")]
+                error!("ERROR: Game failed during update function: {:?}", e);
 
-            panic!("{:?}", GameUpdateError { source: e })
-        }
+                GameUpdateError { source: e }
+            })?;
 
         #[cfg(feature="trace")]
         trace!("EXIT: MyGame::update");
+        Ok(())
     }
 
-    #[cfg_attr(feature="trace", instrument(skip(self)))]
+    #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
     pub(crate) fn is_finished(&self, ecs: &mut World) -> bool {
         #[cfg(feature = "trace")]
         trace!("ENTER: MyGame::is_finished");
@@ -123,7 +140,7 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
             }).unwrap();
 
         #[cfg(feature = "trace")]
-        trace!("EXIT: MyGame::is_finished");
+        trace!("EXIT: MyGame::is_finished. is_finished: {:?}", should_finish);
         return should_finish
     }
 }
@@ -137,5 +154,11 @@ pub enum GameError {
     #[error("Error during update")]
     GameUpdateError { source: SceneStackError },
     #[error("Error during is_finished")]
-    GameIsFinishedError { source: SceneStackError }
+    GameIsFinishedError { source: SceneStackError },
+    #[error("Failed to execute load function for GameWrapper")]
+    GameWrapperLoadError { source: anyhow::Error },
+    #[error("Failed to read World")]
+    WorldReadLockError,
+    #[error("Failed to write World")]
+    WorldWriteLockError,
 }

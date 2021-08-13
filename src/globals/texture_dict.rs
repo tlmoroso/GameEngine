@@ -1,5 +1,5 @@
 #[cfg(feature="trace")]
-use tracing::{instrument, trace, error};
+use tracing::{instrument, trace, error, debug};
 
 use std::collections::HashMap;
 
@@ -18,7 +18,7 @@ use anyhow::Result;
 use image::io::Reader;
 use luminance_front::depth_test::DepthComparison;
 use crate::graphics::texture::Texture as TextureHandle;
-use crate::globals::texture_dict::TextureDictError::{PathConversionFailed, RGB8ConversionFailed};
+use crate::globals::texture_dict::TextureDictError::{PathConversionFailed, RGB8ConversionFailed, WorldWriteLockError, TextureDictFileLoadError};
 use luminance::pixel::RGB8UI;
 use specs::World;
 use std::borrow::BorrowMut;
@@ -35,9 +35,9 @@ unsafe impl Sync for TextureDict {}
 
 pub const IMAGES_DIR: &str = "images/";
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct TextureDictLoader {
-    path: String
+    json: TextureDictJSON
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -55,46 +55,68 @@ impl TextureDictLoader {
         depth_comparison: Some(DepthComparison::Less)
     };
 
-    #[cfg_attr(feature="trace", instrument)]
+    #[cfg_attr(feature="trace", instrument(skip(file_path)))]
     pub fn new(file_path: &impl AsRef<Path>) -> Result<Self> {
-        #[cfg(feature="trace")]
-        trace!("ENTER: ImageDictLoader::new");
+        // Accept anything that can be interpreted as a Path, then convert it to a String for easier use
+        let path = file_path
+            .as_ref()
+            .to_str()
+            .ok_or_else(|e| {
+                #[cfg(feature = "trace")]
+                error!("Failed to convert file path into string.");
+
+                PathConversionFailed
+            })?
+            .to_string(); // Maybe there's a better way to do this?
+
+        let json = load_deserializable_from_file(&path, TEXTURE_DICT_LOAD_ID)
+            .map_err(|e| {
+                #[cfg(feature = "trace")]
+                error!("Failed to deserialize file: ({:?}) into TextureDict JSON value", path.clone());
+
+                TextureDictFileLoadError {
+                    path: path.clone(),
+                    source: e
+                }
+            })?;
+
         let new = Self {
-            // Accept anything that can be interpreted as a Path, then convert it to a String for easier use
-            path: file_path.as_ref().to_str().ok_or(PathConversionFailed)?.to_string() // Maybe there's a better way to do this?
+            json
         };
 
-        #[cfg(feature="trace")]
-        trace!("EXIT: ImageDictLoader::new");
+        #[cfg(feature = "trace")]
+        debug!("Successfully created new TextureDictLoader: {:?}", new.clone());
+
         return Ok(new)
     }
 
-    #[cfg_attr(feature="trace", instrument(skip(self, _ecs, _window)))]
+    #[cfg_attr(feature="trace", instrument)]
     pub fn load(self) -> DrawTask<TextureDict> {
-        #[cfg(feature="trace")]
-        trace!("ENTER: TextureDictLoader::load");
-
-        let path = self.path.clone();
-
-        DrawTask::new(move |u| {
-            let (_, context) = u;
-            let texture_dict_json: TextureDictJSON = load_deserializable_from_file(path.as_str(), TEXTURE_DICT_LOAD_ID)?;
-
+        DrawTask::new(move |(_, context)| {
             #[cfg(feature="trace")]
-            trace!("ImageDictJSON: {:#?} successfully loaded from: {:#?}", image_dict_json, path.clone());
+            trace!("ImageDictJSON: ({:#?}) successfully loaded from: {:#?}", self.json.clone(), path.clone());
 
             let mut texture_dict = HashMap::new();
 
-            let mut ctx = context.write().expect("Failed to lock context");
+            let mut ctx = context.write()
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for World");
 
-            for (image_name, image_path) in texture_dict_json.textures {
+                    WorldWriteLockError
+                })?;
+
+            for (image_name, image_path) in self.json.textures {
                 #[cfg(feature="trace")]
-                trace!("Adding {:#?} at {:#?} to ImageDict", image_name.clone(), image_path.clone());
-                eprintln!("Loading image: name={:?} path={:?}", image_name.clone(), image_path.clone());
+                debug!("Adding {:#?} at {:#?} to new TextureDict", image_name.clone(), image_path.clone());
+
                 let dynamic_image = Reader::open(image_path.clone())?
                     .decode()?;
                 let rgb_image = dynamic_image
                     .into_rgba8();
+
+                #[cfg(feature = "trace")]
+                debug!("Loaded image from file: ({:?}). Converted to rgb_image", image_path.clone());
 
                 let rgb_image_rev: Vec<u8> = rgb_image.rows()
                     // Reverse the contents of each row a.k.a mirror it
@@ -111,7 +133,12 @@ impl TextureDictLoader {
                     })
                     .collect();
 
+                #[cfg(feature = "trace")]
+                debug!("Image reversed for texture and converted into raw bytes.");
+
                 let (x, y) = rgb_image.dimensions();
+                #[cfg(feature = "trace")]
+                debug!("Image dimensions: ({:?}, {:?})", x, y);
 
                 let texture = Texture::new_raw(
                     ctx.deref_mut(),
@@ -120,10 +147,24 @@ impl TextureDictLoader {
                     Self::SAMPLER,
                     GenMipmaps::Yes,
                     &rgb_image_rev
-                )?;
+                ).map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to create texture from image. Name: ({:?}). Path: {:?}", image_name.clone(), image_path.clone());
+
+                    return e
+                })?;
+
+                #[cfg(feature = "trace")]
+                debug!("Texture created.");
 
                 texture_dict.insert(image_name, texture);
+
+                #[cfg(feature = "trace")]
+                debug!("Texture inserted into texture_dict");
             }
+
+            #[cfg(feature = "trace")]
+            debug!("Loaded and returning TextureDict. Keys: {:?}", texture_dict.keys());
 
             return Ok(TextureDict(texture_dict))
         })
@@ -131,18 +172,22 @@ impl TextureDictLoader {
 }
 
 impl TextureDict {
+    #[cfg_attr(feature = "trace", instrument(skip(self)))]
     pub fn contains_key(&self, key: &TextureHandle) -> bool {
         self.0.contains_key(&key.handle)
     }
 
+    #[cfg_attr(feature = "trace", instrument(skip(self)))]
     pub fn get(&self, key: &TextureHandle) -> Option<&Texture<Dim2, RGBA8UI>> {
         self.0.get(&key.handle)
     }
 
+    #[cfg_attr(feature = "trace", instrument(skip(self)))]
     pub fn get_mut(&mut self, key: &TextureHandle) -> Option<&mut Texture<Dim2, RGBA8UI>> {
         self.0.get_mut(&key.handle)
     }
 
+    #[cfg_attr(feature = "trace", instrument(skip(self, value)))]
     pub fn insert(&mut self, key: &TextureHandle, value: Texture<Dim2,RGBA8UI>) -> Option<Texture<Dim2,RGBA8UI>> {
         self.0.insert(key.handle.clone(), value)
     }
@@ -150,10 +195,9 @@ impl TextureDict {
 
 #[derive(Error, Debug)]
 pub enum TextureDictError {
-    #[error("Error loading JSON Value for ImageDictLoader from: {var_name} = {path}")]
+    #[error("Error loading JSON Value for ImageDictLoader from: {path}")]
     TextureDictFileLoadError {
         path: String,
-        var_name: String,
         source: LoadError
     },
 
@@ -164,5 +208,7 @@ pub enum TextureDictError {
     RGB8ConversionFailed {
         image_name: String,
         image_path: String
-    }
+    },
+    #[error("Failed to acquire write lock for World")]
+    WorldWriteLockError
 }

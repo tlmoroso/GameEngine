@@ -16,11 +16,12 @@ use thiserror::Error;
 use anyhow::Result;
 
 #[cfg(feature="trace")]
-use tracing::{instrument, trace, error};
+use tracing::{instrument, error, debug};
 use specs::world::EntitiesRes;
 use crate::loading::DrawTask;
 use luminance_glfw::GL33Context;
 use std::borrow::BorrowMut;
+use crate::entities::EntityError::{EntityLoaderDeserializeError, EntityWorldWriteLockError, EntityFileLoadError, ComponentMuxError, EntityComponentLoaderError};
 
 pub mod player;
 pub mod textbox;
@@ -28,11 +29,12 @@ pub mod textbox;
 pub const ENTITIES_DIR: &str = "entities/";
 pub const ENTITY_LOADER_FILE_ID: &str = "entity_loader";
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub(crate) struct EntityLoaderJSON {
     component_paths: Vec<String>
 }
 
+#[derive(Debug, Clone)]
 pub struct EntityLoader {
     entity_file: String,
 }
@@ -40,56 +42,107 @@ pub struct EntityLoader {
 impl EntityLoader {
     #[cfg_attr(feature="trace", instrument)]
     pub fn new(file_path: String) -> Self {
-        #[cfg(feature="trace")]
-        trace!("ENTER: EntityLoader::new");
-
         let new = Self {
             entity_file: file_path,
         };
 
-        #[cfg(feature="trace")]
-        trace!("EXIT: EntityLoader::new");
+        #[cfg(feature = "trace")]
+        debug!("Successfully created new EntityLoader from given path: {:?}", new);
 
         return new
     }
 
-    #[cfg_attr(feature="trace", instrument(skip(self, ecs, window)))]
+    #[cfg_attr(feature="trace", instrument(skip(self)))]
     pub fn load_entity<T: ComponentMux>(&self) -> DrawTask<Entity> {
         let file_path = self.entity_file.clone();    // Attempt to not have self in the closure
 
         DrawTask::new(move |(world, context)| {
-            let entity_json: EntityLoaderJSON = load_deserializable_from_file(&file_path, ENTITY_LOADER_FILE_ID)?;
+            let entity_json: EntityLoaderJSON = load_deserializable_from_file(&file_path, ENTITY_LOADER_FILE_ID)
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to load JSON value for Entity from file: {:?}", file_path.clone());
 
-            let ecs = world.read().expect("Failed to lock World");
+                    EntityLoaderDeserializeError {
+                        source: e,
+                        file_path: file_path.clone()
+                    }
+                })?;
+
+            #[cfg(feature = "trace")]
+            debug!("Entity JSON value loaded from file: {:?}", file_path.clone());
+
+            let ecs = world.read()
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    debug!("Error acquiring write lock for World");
+
+                    EntityWorldWriteLockError
+                })?;
 
             let lazy_update = ecs.fetch::<LazyUpdate>();
             let entities = ecs.fetch::<EntitiesRes>();
 
             let mut builder = lazy_update.create_entity(&entities);
 
-            for component_path in entity_json.component_paths {
-                eprintln!("Loading component: {:?}", component_path.clone());
-                let json = load_json(&component_path)?;
-                let loader = T::map_json_to_loader(json)?;
+            #[cfg(feature = "trace")]
+            debug!("Lazy Builder has been created for building Entity");
 
-                builder = loader.load_component(builder, world.clone(), Some(context.clone()))?;
-                eprintln!("component loaded");
+            for component_path in entity_json.component_paths {
+                #[cfg(feature = "trace")]
+                debug!("Loading component from: {:?}", component_path.clone());
+                let json = load_json(&component_path)
+                    .map_err(|e| {
+                        #[cfg(feature = "trace")]
+                        error!("Error occurred while loading component JSON value.");
+
+                        EntityFileLoadError {
+                            file: component_path.clone(),
+                            source: e
+                        }
+                    })?;
+                let loader = T::map_json_to_loader(json.clone())
+                    .map_err(|e| {
+                        #[cfg(feature = "trace")]
+                        error!("Error occurred while mapping JSON value: ({:?}) to Component type", json);
+
+                        ComponentMuxError {
+                            source: e,
+                            component_json: json
+                        }
+                    })?;
+
+                builder = loader.load_component(builder, world.clone(), Some(context.clone()))
+                    .map_err(|e| {
+                        #[cfg(feature = "trace")]
+                        error!("Error occurred while loading component.");
+
+                        EntityComponentLoaderError {
+                            component_path,
+                            source: e
+                        }
+                    })?;
+                #[cfg(feature = "trace")]
+                debug!("Component loaded");
             }
 
-            Ok(builder.build())
+            let entity = builder.build();
+
+            #[cfg(feature = "trace")]
+            debug!("Entity built: {:?}", entity);
+
+            return Ok(entity)
         })
     }
 }
 
 #[derive(Error, Debug)]
 pub enum EntityError {
-    #[error("Error loading JSON Value from: {var_name} = {file}")]
+    #[error("Error loading JSON Value from {file}")]
     EntityFileLoadError {
         file: String,
-        var_name: String,
         source: LoadError
     },
-    #[error("Error creating EntityLoader from: {file_path}")]
+    #[error("Error creating EntityLoader JSON from: {file_path}")]
     EntityLoaderDeserializeError {
         file_path: String,
         source: LoadError
@@ -99,13 +152,15 @@ pub enum EntityError {
         component_path: String,
         source: anyhow::Error
     },
-    #[error("Error retrieving lock for {var_name}\nError Source: {source_string}")]
-    EntityWorldRWLockError {
-        var_name: String,
-        source_string: String
-    },
+    #[error("Error retrieving write lock for World")]
+    EntityWorldWriteLockError,
     #[error("Error loading component from Component Loader")]
     EntityLoadComponentError {
         source: anyhow::Error
+    },
+    #[error("Error matching component JSON value {component_json:?} to Component")]
+    ComponentMuxError {
+        source: anyhow::Error,
+        component_json: JSONLoad
     }
 }

@@ -9,20 +9,21 @@ use anyhow::Result;
 use crate::log::LogError::{InitLogTracerError, SetGlobalDefaultError};
 
 pub fn init_logger() -> Result<()>{
-    LogTracer::init().map_err(|e| {
-        InitLogTracerError {
-            source: e
-        }
-    })?;
+    // LogTracer::init().map_err(|e| {
+    //     InitLogTracerError {
+    //         source: e
+    //     }
+    // })?;
 
     let app_name = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION")).to_string();
-    let file_appender = tracing_appender::rolling::daily("/", "game_engine.log");
+    let file_appender = tracing_appender::rolling::daily("./", "game_engine.log");
     let (non_blocking_writer, _guard) = non_blocking(file_appender);
     let bunyan_formatting_layer = BunyanFormattingLayer::new(app_name, non_blocking_writer);
     let subscriber = Registry::default()
-        .with(EnvFilter::new("INFO"))
+        .with(EnvFilter::from_default_env())
         .with(JsonStorageLayer)
         .with(bunyan_formatting_layer);
+
     tracing::subscriber::set_global_default(subscriber).map_err(|e| {
         SetGlobalDefaultError {
             source: e

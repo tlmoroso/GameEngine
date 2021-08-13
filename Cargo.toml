@@ -9,7 +9,7 @@ name = "game_engine"
 path = "src/lib.rs"
 
 [features]
-trace = ["tracing", "tracing-subscriber", "tracing-bunyan-formatter", "tracing-appender"]
+trace = ["tracing", "tracing-subscriber", "tracing-bunyan-formatter", "tracing-appender", "tracing-log"]
 
 [dependencies]
 coffee = {version = "0.4", features = ["opengl"]}
@@ -18,11 +18,11 @@ serde = {version = "1.0", features = ["derive"]}
 serde_json = {version = "1.0"}
 thiserror = "1.0.22"
 anyhow = "1.0.34"
-tracing = {version = "0.1.22", optional = true}
-tracing-subscriber = {version = "0.2.15", optional = true, features = ["registry"]}
+tracing = {version = "0.1.26", optional = true}
+tracing-subscriber = {version = "0.2.19", optional = true}
 tracing-bunyan-formatter = {version = "0.1.7", optional = true}
 tracing-log = {version = "0.1.1", optional = true}
-tracing-appender = {version = "0.1.1", optional = true}
+tracing-appender = {version = "0.1.2", optional = true}
 kira = "0.3.0"
 tokio = {version = "1.2.0", features = ["full"]}
 gilrs = "0.8.0"

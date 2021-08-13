@@ -2,6 +2,9 @@ use glfw::{Modifiers, WindowEvent, Action, Key as GLFWKey};
 use std::collections::HashSet;
 use crate::input::Input;
 
+#[cfg(feature = "trace")]
+use tracing::{warn, debug, error, instrument};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Key {
     pub key: GLFWKey,
@@ -23,16 +26,22 @@ pub struct KeyBoard {
 }
 
 impl KeyBoard {
+    #[cfg_attr(feature = "trace", instrument)]
     pub fn get_pressed_keys(&self) -> &HashSet<Key> {
         &self.pressed_keys
     }
 
+    #[cfg_attr(feature = "trace", instrument)]
     pub fn get_released_keys(&self) -> &HashSet<Key> {
         &self.pressed_keys
     }
+
+    #[cfg_attr(feature = "trace", instrument)]
+    pub fn get_char(&self) -> Character { self.new_char }
 }
 
 impl Input for KeyBoard {
+    #[cfg_attr(feature = "trace", instrument)]
     fn new() -> Self {
         KeyBoard {
             pressed_keys: HashSet::new(),
@@ -44,11 +53,21 @@ impl Input for KeyBoard {
         }
     }
 
+    #[cfg_attr(feature = "trace", instrument)]
     fn update(&mut self, event: WindowEvent) {
+        #[cfg(feature = "trace")]
+        debug!("Matching on window event: {:?}", event);
+
         match event  {
             WindowEvent::Key(key, scancode, action, modifiers) => {
+                #[cfg(feature = "trace")]
+                debug!("Matched on Key: Key({:?}, {:?}, {:?}, {:?}). Now matching on action: {:?}", key, scancode, action, modifiers, action);
+
                 match action {
                     Action::Press => {
+                        #[cfg(feature = "trace")]
+                        debug!("Matched on Press. Adding new pressed key.");
+
                         self.pressed_keys.insert(
                             Key {
                                 key,
@@ -58,6 +77,9 @@ impl Input for KeyBoard {
                         );
                     },
                     Action::Release => {
+                        #[cfg(feature = "trace")]
+                        debug!("Matched on action Release. Updating released_keys.");
+
                         self.released_keys.insert(
                             Key {
                                 key,
@@ -66,30 +88,48 @@ impl Input for KeyBoard {
                             }
                         );
                     },
-                    _ => {/*
+                    _ => {
+                        /*
                         Currently uninterested in this action.
                         NOT to be mistaken with isKeyHeldDown
-                     */}
+                        */
+
+                        #[cfg(feature = "trace")]
+                        warn!("Failed to match on action. Defaulting to doing nothing.");
+                    }
                 }
             },
             // Char and CharModifiers represent software characters instead of physical keys
             // This is for excepting text input and handling characters that require multi-key inputs
             WindowEvent::Char(character) => {
+                #[cfg(feature = "trace")]
+                debug!("Matched on Char: ({:?}). Adding Character.", character);
+
                 self.new_char = Character {
                     character,
                     modifiers: Modifiers::empty()
                 }
             },
             WindowEvent::CharModifiers(character, modifiers) => {
+                #[cfg(feature = "trace")]
+                debug!("Matched on CharModifiers. Adding Character. Char: ({:?}), Mods: {:?}", character, modifiers);
                 self.new_char = Character { character, modifiers }
             },
-            _ => {/* Ignore anything unrelated to the keyboard */}
+            _ => {
+                /* Ignore anything unrelated to the keyboard */
+
+                #[cfg(feature = "trace")]
+                warn!("Failed to match on anything. Defaulting to doing nothing.");
+            }
         }
     }
 
+    #[cfg_attr(feature = "trace", instrument)]
     fn clear(&mut self) {
         self.new_char = Character { character: char::default(), modifiers: Modifiers::empty() };
         self.released_keys.clear();
         self.pressed_keys.clear();
+        #[cfg(feature = "trace")]
+        debug!("Cleared all values held within the keyboard");
     }
 }

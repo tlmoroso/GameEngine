@@ -1,3 +1,5 @@
+// pub mod Texture2D;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -14,17 +16,20 @@ use thiserror::Error;
 
 use crate::components::ComponentLoader;
 use crate::globals::texture_dict::{TextureDict};
-use crate::graphics::texture::TextureError::{FileNameDNE, PathNotFile, PathStringConversion, ReaderFailedToOpen, TextureDictDNE, RGB8ConversionFailed};
-use crate::graphics::texture::TextureLoaderError::{CanNotDeserialize, ContextMissing, TextureDidNotLoad};
+use crate::graphics::texture::TextureLoaderError::{CanNotDeserialize, ContextMissing, TextureDidNotLoad, FileNameDNE, PathNotFile, PathStringConversion, ReaderFailedToOpen, TextureDictDNE, RGB8ConversionFailed, WorldReadLockError, DecodeError, ContextWriteLockError};
 use crate::load::{JSONLoad, load_deserializable_from_json, LoadError};
 use crate::loading::DrawTask;
 use std::sync::{Arc, Mutex, RwLock};
 use std::borrow::BorrowMut;
 use std::ops::DerefMut;
 
+#[cfg(feature = "trace")]
+use tracing::{error, debug, instrument};
+use image::ImageError;
+
 #[derive(Debug, Clone)]
 pub struct Texture {
-    pub(crate) handle: String
+    pub(crate) handle: String,
 }
 
 impl Component for Texture { type Storage = VecStorage<Self>; }
@@ -38,51 +43,121 @@ impl Texture {
         mag_filter: MagFilter::Nearest,
         depth_comparison: Some(DepthComparison::Less)
     };
-    
-    pub fn load(path: PathBuf, name: Option<String>) -> DrawTask<Self> {
-        DrawTask::new(|(world, context)| {
-            let path_string = path
-                .to_str()
-                .ok_or(
-                    PathStringConversion {
-                        path: path.clone()
-                    }
-                )?
-                .to_string();
+}
 
-            if !path.is_file() { return Err(anyhow::Error::new(PathNotFile { path: path_string })) }
+#[derive(Deserialize, Debug, Clone)]
+pub struct TextureJSON {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub image_path: String
+}
+
+#[derive(Debug)]
+pub struct TextureLoader {
+    pub json: TextureJSON
+}
+
+pub const TEXTURE_LOAD_ID: &str = "texture";
+
+impl ComponentLoader for TextureLoader {
+    #[cfg_attr(feature = "trace", instrument)]
+    fn from_json(json: JSONLoad) -> Result<Self> where Self: Sized {
+        let texture_json: TextureJSON = load_deserializable_from_json(&json, &TEXTURE_LOAD_ID)
+            .map_err(|e| {
+                #[cfg(feature = "trace")]
+                error!("Failed to deserialize JSONLoad value: ({:?}) into TextureJSON type", json.clone());
+
+                CanNotDeserialize {
+                    json: json.clone(),
+                    source: e
+                }
+            })?;
+
+        #[cfg(feature = "trace")]
+        debug!("Converted JSONLoad value: ({:?}) into TextureJSON value: {:?}", json.clone(), texture_json.clone());
+
+        Ok(Self{ json: texture_json })
+    }
+
+    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>, context: Option<Arc<RwLock<GL33Context>>>) -> Result<LazyBuilder<'a>> {
+        if let Some(context) = context {
+            let path = PathBuf::from(self.json.image_path.clone());
+
+            if !path.is_file() {
+                #[cfg(feature = "trace")]
+                error!("Given path: ({:?}) does not point to file", path_string.clone());
+
+                return Err(anyhow::Error::new(PathNotFile { path: path_string }))
+            }
 
             let name = if let Some(name) = name {
+                #[cfg(feature = "trace")]
+                debug!("Optional name was given for texture: {:?}", name.clone());
+
                 name
             } else {
-                path.file_stem()
-                    .ok_or(FileNameDNE {path: path_string.clone()})?
+                let name = path.file_stem()
+                    .ok_or_else(|| {
+                        #[cfg(feature = "trace")]
+                        error!("Could not get file stem(a.k.a file name) of path: {:?}", path_string);
+
+                        FileNameDNE {
+                            path: path_string.clone()
+                        }
+                    })?
                     .to_string_lossy()
-                    .to_string()
+                    .to_string();
+
+                #[cfg(feature = "trace")]
+                debug!("Name not given. Converted file name into image name: {:?}", name.clone());
+
+                name
             };
 
-            // eprintln!("Texture name={:?}", name.clone());
-            // let mut ecs = world.lock().expect("Failed to lock World");
-            // eprintln!("Acquired ecs");
+            let world = ecs.read()
+                .map_err(|| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire read lock for world");
 
-            let world = world.read()
-                .expect("Failed to lock World");
+                    WorldReadLockError
+                })?;
 
             let mut texture_dict = world.fetch_mut::<TextureDict>();
-            eprintln!("Acquired texture_dict");
+            #[cfg(feature = "trace")]
+            debug!("Fetched texture store from ECS.");
 
-            let texture_handle = Self { handle: name.clone() };
+            let texture_handle = Texture { handle: name.clone() };
 
             if !texture_dict.contains_key(&texture_handle) {
+                #[cfg(feature = "trace")]
+                debug!("This is a new texture. It needs to be loaded from file and stored in the Texture Store.");
+
                 let dynamic_image = Reader::open(path)
-                    .map_err(|e| ReaderFailedToOpen {
-                        path: path_string.clone(),
-                        source: e
-                    }
-                    )?
-                    .decode()?;
+                    .map_err(|e| {
+                        #[cfg(feature = "trace")]
+                        error!("Failed to open image file at path: {:?}", path_string.clone());
+
+                        ReaderFailedToOpen {
+                            path: path_string.clone(),
+                            source: e
+                        }
+                    })?
+                    .decode()
+                    .map_err(|e| {
+                        #[cfg(feature = "trace")]
+                        error!("Failed to decode image at path: {:?}", path_string.clone());
+
+                        DecodeError {
+                            source: e,
+                            image_path: path_string.clone()
+                        }
+                    })?;
+
                 let rgb_image = dynamic_image
                     .into_rgba8();
+
+                #[cfg(feature = "trace")]
+                debug!("Successfully converted image from file into RGBA8 format");
 
                 let rgb_image_rev: Vec<u8> = rgb_image.rows()
                     // Reverse the contents of each row a.k.a mirror it
@@ -90,7 +165,7 @@ impl Texture {
                     .flat_map(|row| {
                         row.rev()
                     })
-                    // Reverse all the rows a.k.a flip upside down
+                    // Reverse all rows a.k.a flip upside down
                     .rev()
                     // Flat_map expects an iter as the return value and automatically flattens it
                     // so we can use it as another way to convert a vec of pixels into the raw bytes
@@ -98,10 +173,20 @@ impl Texture {
                         pixel.0
                     })
                     .collect();
+                #[cfg(feature = "trace")]
+                debug!("Flipped and mirrored image so it is drawn properly by renderer.");
 
                 let (x, y) = rgb_image.dimensions();
+                #[cfg(feature = "trace")]
+                debug!("Image size is x: {:?}, y: {:?}", x, y);
 
-                let mut ctx = context.write().expect("Failed to lock context");
+                let mut ctx = context.write()
+                    .map_err(|_| {
+                        #[cfg(feature = "trace")]
+                        error!("Failed to acquire write lock for Context");
+
+                        ContextWriteLockError
+                    });
 
                 let texture = LumTex::new_raw(
                     ctx.deref_mut(),
@@ -112,16 +197,74 @@ impl Texture {
                     &rgb_image_rev
                 )?;
 
+                #[cfg(feature = "trace")]
+                debug!("Created texture from raw image bytes. Storing in Texture Store.");
+
                 texture_dict.insert(&texture_handle, texture);
             }
 
-            Ok(texture_handle)
-        })
+            #[cfg(feature = "trace")]
+            debug!("Successfully created Texture. Adding to builder.");
+
+            Ok(builder.with(texture_handle))
+        } else {
+            #[cfg(feature = "trace")]
+            error!("Optional Context was required for this component. Returning error.");
+
+            Err(anyhow::Error::new(
+                ContextMissing {
+                    texture: self.json.clone()
+                }
+            ))
+        }
+    }
+
+    #[cfg_attr(feature = "trace", instrument)]
+    fn set_value(&mut self, new_value: JSONLoad) -> Result<()> {
+        self.json = load_deserializable_from_json(&new_value, &TEXTURE_LOAD_ID)
+            .map_err(|e| {
+                #[cfg(feature = "trace")]
+                error!("Failed to convert JSONLoad value: ({:?}) into TextureJSON", new_value.clone());
+
+                CanNotDeserialize {
+                    json: new_value.clone(),
+                    source: e
+                }
+            })?;
+
+        #[cfg(feature = "trace")]
+        debug!("Successfully converted new JSONLoad value: ({:?}) into TextureJSON type: ({:?}) and replaced old value.", new_value.clone(), self.json.clone());
+
+        Ok(())
+    }
+
+    #[cfg_attr(feature = "trace", instrument)]
+    fn get_component_name(&self) -> String {
+        #[cfg(feature = "trace")]
+        debug!("Returning component name: {:?}", TEXTURE_LOAD_ID.to_string());
+
+        return TEXTURE_LOAD_ID.to_string()
     }
 }
 
 #[derive(Error, Debug)]
-pub enum TextureError {
+pub enum TextureLoaderError {
+    #[error("Failed to deserialize json from JSONLoad value={json:?}")]
+    CanNotDeserialize {
+        json: JSONLoad,
+        source: LoadError
+    },
+
+    #[error("Context is required but value was None")]
+    ContextMissing {
+        texture: TextureJSON
+    },
+
+    #[error("Failed to load texture")]
+    TextureDidNotLoad {
+        texture_info: TextureJSON,
+        source: anyhow::Error
+    },
     #[error("TextureDict could not be retrieved from World")]
     TextureDictDNE,
 
@@ -150,80 +293,17 @@ pub enum TextureError {
     RGB8ConversionFailed {
         image_path: String,
         image_name: String
-    }
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct TextureJSON {
-    #[serde(default)]
-    pub name: Option<String>,
-    pub image_path: String
-}
-
-#[derive(Debug)]
-pub struct TextureLoader {
-    pub json: TextureJSON
-}
-
-pub const TEXTURE_LOAD_ID: &str = "texture";
-
-impl ComponentLoader for TextureLoader {
-    fn from_json(json: JSONLoad) -> Result<Self> where Self: Sized {
-        let json = load_deserializable_from_json(&json, &TEXTURE_LOAD_ID)
-            .map_err(|e| { CanNotDeserialize {json, source: e} })?;
-
-        Ok(Self{ json })
-    }
-
-    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>, context: Option<Arc<RwLock<GL33Context>>>) -> Result<LazyBuilder<'a>> {
-        if let Some(context) = context {
-            let texture = Texture::load(PathBuf::from(&self.json.image_path), self.json.name.clone())
-                .execute((ecs, context))
-                .map_err(|e| {
-                    TextureDidNotLoad {
-                        texture_info: self.json.clone(),
-                        source: e
-                    }
-                })?;
-
-            Ok(builder.with(texture))
-        } else {
-            Err(anyhow::Error::new(
-                ContextMissing {
-                    texture: self.json.clone()
-                }
-            ))
-        }
-    }
-
-    fn set_value(&mut self, new_value: JSONLoad) -> Result<()> {
-        self.json = load_deserializable_from_json(&new_value, &TEXTURE_LOAD_ID)
-            .map_err(|e| { CanNotDeserialize {json: new_value, source: e} })?;
-
-        Ok(())
-    }
-
-    fn get_component_name(&self) -> String {
-        return TEXTURE_LOAD_ID.to_string()
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum TextureLoaderError {
-    #[error("Failed to deserialize json from JSONLoad value={json:?}")]
-    CanNotDeserialize {
-        json: JSONLoad,
-        source: LoadError
     },
 
-    #[error("Context is required but value was None")]
-    ContextMissing {
-        texture: TextureJSON
-    },
+    #[error("Failed to acquire read lock for World")]
+    WorldReadLockError,
 
-    #[error("Failed to load texture")]
-    TextureDidNotLoad {
-        texture_info: TextureJSON,
-        source: anyhow::Error
+    #[error("Failed to acquire write lock for Context")]
+    ContextWriteLockError,
+
+    #[error("Failed to decode image reader into DynamicImage from image at {image_path}")]
+    DecodeError {
+        source: ImageError,
+        image_path: String
     }
 }
