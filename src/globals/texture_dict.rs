@@ -17,7 +17,7 @@ use luminance_front::context::GraphicsContext;
 use anyhow::Result;
 use image::io::Reader;
 use luminance_front::depth_test::DepthComparison;
-use crate::graphics::texture::Texture as TextureHandle;
+use crate::graphics::texture::TextureHandle;
 use crate::globals::texture_dict::TextureDictError::{PathConversionFailed, RGB8ConversionFailed, WorldWriteLockError, TextureDictFileLoadError};
 use luminance::pixel::RGB8UI;
 use specs::World;

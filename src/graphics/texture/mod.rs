@@ -28,13 +28,13 @@ use tracing::{error, debug, instrument};
 use image::ImageError;
 
 #[derive(Debug, Clone)]
-pub struct Texture {
+pub struct TextureHandle {
     pub(crate) handle: String,
 }
 
-impl Component for Texture { type Storage = VecStorage<Self>; }
+impl Component for TextureHandle { type Storage = VecStorage<Self>; }
 
-impl Texture {
+impl TextureHandle {
     const SAMPLER: Sampler = Sampler {
         wrap_r: Wrap::ClampToEdge,
         wrap_s: Wrap::ClampToEdge,
@@ -79,8 +79,12 @@ impl ComponentLoader for TextureLoader {
         Ok(Self{ json: texture_json })
     }
 
+    #[cfg_attr(feature = "trace", instrument(skip(builder, ecs, context)))]
     fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>, context: Option<Arc<RwLock<GL33Context>>>) -> Result<LazyBuilder<'a>> {
         if let Some(context) = context {
+            #[cfg(feature = "trace")]
+            debug!("Context exists. Loading texture.");
+
             let path = PathBuf::from(self.json.image_path.clone());
 
             if !path.is_file() {
@@ -126,7 +130,7 @@ impl ComponentLoader for TextureLoader {
             #[cfg(feature = "trace")]
             debug!("Fetched texture store from ECS.");
 
-            let texture_handle = Texture { handle: name.clone() };
+            let texture_handle = TextureHandle { handle: name.clone() };
 
             if !texture_dict.contains_key(&texture_handle) {
                 #[cfg(feature = "trace")]

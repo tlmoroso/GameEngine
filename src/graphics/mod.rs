@@ -4,6 +4,8 @@ use luminance_glfw::GL33Context;
 pub mod texture;
 pub mod render;
 pub mod transform;
+pub mod shader;
+pub mod tess;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Handle(pub String);

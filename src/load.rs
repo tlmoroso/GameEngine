@@ -122,11 +122,11 @@ pub fn load_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>) ->
 }
 
 #[cfg_attr(feature="trace", instrument)]
-pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de> + Debug>(file_path: &str, file_id: &str) -> Result<T, LoadError> {
+pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de> + Debug>(file_path: &str, load_id: &str) -> Result<T, LoadError> {
     let json_value = load_json(file_path)
         .map_err(|e| {
             #[cfg(feature = "trace")]
-            error!("Something went wrong while loading a JSONLoad object from file. Path: ({:?}). ID: {:?}", file_path.clone(), file_id.clone());
+            error!("Something went wrong while loading a JSONLoad object from file. Path: ({:?}). ID: {:?}", file_path.clone(), load_id.clone());
 
             return e
         })?;
@@ -134,9 +134,9 @@ pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de> + Debug>(file_
     #[cfg(feature="trace")]
     debug!("Successfully loaded JSONLoad: ({:?}) from: {:?}", json_value.clone(), file_path.clone());
 
-    if json_value.load_type_id != file_id {
+    if json_value.load_type_id != load_id {
         #[cfg(feature = "trace")]
-        error!("Type ID: ({:?}) of loaded object does not match given type ID: {:?}", json_value.load_type_id.clone(), file_id.clone());
+        error!("Type ID: ({:?}) of loaded object does not match given type ID: {:?}", json_value.load_type_id.clone(), load_id.clone());
 
         return Err( LoadIDError {
                 actual: json_value.load_type_id,
@@ -145,7 +145,7 @@ pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de> + Debug>(file_
     }
 
     #[cfg(feature="trace")]
-    debug!("Load ID: ({:?}) matched given file ID: {:?}", json_value.load_type_id.clone(), file_id.clone());
+    debug!("Load ID: ({:?}) matched given file ID: {:?}", json_value.load_type_id.clone(), load_id.clone());
 
     let deserialized_value: Result<T, LoadError> = from_value(json_value.actual_value.clone())
         .map_err(|e| {

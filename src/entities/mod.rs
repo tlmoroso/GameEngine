@@ -27,7 +27,7 @@ pub mod player;
 pub mod textbox;
 
 pub const ENTITIES_DIR: &str = "entities/";
-pub const ENTITY_LOADER_FILE_ID: &str = "entity_loader";
+pub const ENTITY_LOAD_ID: &str = "entity_loader";
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct EntityLoaderJSON {
@@ -57,7 +57,7 @@ impl EntityLoader {
         let file_path = self.entity_file.clone();    // Attempt to not have self in the closure
 
         DrawTask::new(move |(world, context)| {
-            let entity_json: EntityLoaderJSON = load_deserializable_from_file(&file_path, ENTITY_LOADER_FILE_ID)
+            let entity_json: EntityLoaderJSON = load_deserializable_from_file(&file_path, ENTITY_LOAD_ID)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to load JSON value for Entity from file: {:?}", file_path.clone());
