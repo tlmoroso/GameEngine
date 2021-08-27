@@ -1,31 +1,30 @@
 // pub mod Texture2D;
 
+use std::borrow::BorrowMut;
+use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::Result;
+use image::ImageError;
 use image::io::Reader;
 use luminance::depth_test::DepthComparison;
-use luminance_front::texture::{GenMipmaps, MagFilter, MinFilter, Sampler, Texture as LumTex, Wrap};
 use luminance_front::pixel::Pixel;
+use luminance_front::texture::{GenMipmaps, MagFilter, MinFilter, Sampler, Texture as LumTex, Wrap};
 use luminance_glfw::GL33Context;
 use serde::Deserialize;
 use specs::{Builder, Component, VecStorage, World};
 use specs::storage::UnprotectedStorage;
 use specs::world::LazyBuilder;
 use thiserror::Error;
+#[cfg(feature = "trace")]
+use tracing::{debug, error, instrument};
 
 use crate::components::ComponentLoader;
-use crate::globals::texture_dict::{TextureDict};
-use crate::graphics::texture::TextureLoaderError::{CanNotDeserialize, ContextMissing, TextureDidNotLoad, FileNameDNE, PathNotFile, PathStringConversion, ReaderFailedToOpen, TextureDictDNE, RGB8ConversionFailed, WorldReadLockError, DecodeError, ContextWriteLockError};
+use crate::globals::texture_dict::TextureDict;
+use crate::graphics::texture::TextureLoaderError::{CanNotDeserialize, ContextMissing, ContextWriteLockError, DecodeError, FileNameDNE, PathNotFile, PathStringConversion, ReaderFailedToOpen, RGB8ConversionFailed, TextureDictDNE, TextureDidNotLoad, WorldReadLockError};
 use crate::load::{JSONLoad, load_deserializable_from_json, LoadError};
 use crate::loading::DrawTask;
-use std::sync::{Arc, Mutex, RwLock};
-use std::borrow::BorrowMut;
-use std::ops::DerefMut;
-
-#[cfg(feature = "trace")]
-use tracing::{error, debug, instrument};
-use image::ImageError;
 
 #[derive(Debug, Clone)]
 pub struct TextureHandle {
@@ -89,12 +88,12 @@ impl ComponentLoader for TextureLoader {
 
             if !path.is_file() {
                 #[cfg(feature = "trace")]
-                error!("Given path: ({:?}) does not point to file", path_string.clone());
+                error!("Given path: ({:?}) does not point to file", self.json.image_path.clone());
 
-                return Err(anyhow::Error::new(PathNotFile { path: path_string }))
+                return Err(anyhow::Error::new(PathNotFile { path: self.json.image_path.clone() }))
             }
 
-            let name = if let Some(name) = name {
+            let name = if let Some(name) = self.json.name.clone() {
                 #[cfg(feature = "trace")]
                 debug!("Optional name was given for texture: {:?}", name.clone());
 
@@ -103,10 +102,10 @@ impl ComponentLoader for TextureLoader {
                 let name = path.file_stem()
                     .ok_or_else(|| {
                         #[cfg(feature = "trace")]
-                        error!("Could not get file stem(a.k.a file name) of path: {:?}", path_string);
+                        error!("Could not get file stem(a.k.a file name) of path: {:?}", self.json.image_path.clone());
 
                         FileNameDNE {
-                            path: path_string.clone()
+                            path: self.json.image_path.clone()
                         }
                     })?
                     .to_string_lossy()
@@ -119,7 +118,7 @@ impl ComponentLoader for TextureLoader {
             };
 
             let world = ecs.read()
-                .map_err(|| {
+                .map_err(|_| {
                     #[cfg(feature = "trace")]
                     error!("Failed to acquire read lock for world");
 
@@ -139,21 +138,21 @@ impl ComponentLoader for TextureLoader {
                 let dynamic_image = Reader::open(path)
                     .map_err(|e| {
                         #[cfg(feature = "trace")]
-                        error!("Failed to open image file at path: {:?}", path_string.clone());
+                        error!("Failed to open image file at path: {:?}", self.json.image_path.clone());
 
                         ReaderFailedToOpen {
-                            path: path_string.clone(),
+                            path: self.json.image_path.clone(),
                             source: e
                         }
                     })?
                     .decode()
                     .map_err(|e| {
                         #[cfg(feature = "trace")]
-                        error!("Failed to decode image at path: {:?}", path_string.clone());
+                        error!("Failed to decode image at path: {:?}", self.json.image_path.clone());
 
                         DecodeError {
                             source: e,
-                            image_path: path_string.clone()
+                            image_path: self.json.image_path.clone()
                         }
                     })?;
 
@@ -190,13 +189,13 @@ impl ComponentLoader for TextureLoader {
                         error!("Failed to acquire write lock for Context");
 
                         ContextWriteLockError
-                    });
+                    })?;
 
                 let texture = LumTex::new_raw(
                     ctx.deref_mut(),
                     [x, y],
                     0,
-                    Self::SAMPLER,
+                    TextureHandle::SAMPLER,
                     GenMipmaps::No,
                     &rgb_image_rev
                 )?;

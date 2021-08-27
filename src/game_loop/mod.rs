@@ -90,10 +90,10 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
 
         #[cfg(feature = "trace")]
         debug!("Setup complete. Entering game loop.");
-        'app: loop {
+        loop {
             // handle events
             context.write()
-                .map_err(|e| {
+                .map_err(|_e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to acquire write lock for context");
 
@@ -132,7 +132,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
                         input.update(event);
                         game.interact(ecs
                           .write()
-                          .map_err(|e| {
+                          .map_err(|_e| {
                               #[cfg(feature = "trace")]
                               error!("Failed to acquire the write lock for World");
 
@@ -155,7 +155,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
                 // Update
                 game.update(ecs
                     .write()
-                    .map_err(|e| {
+                    .map_err(|_e| {
                         #[cfg(feature = "trace")]
                         error!("Failed to acquire write lock for World");
 
@@ -175,7 +175,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
                 // Draw
                 game.draw(ecs
                               .write()
-                              .map_err(|e| {
+                              .map_err(|_e| {
                                   #[cfg(feature = "trace")]
                                   error!("Failed to acquire write lock for World");
 
@@ -184,7 +184,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
                               .deref_mut(),
                           context
                               .write()
-                              .map_err(|e| {
+                              .map_err(|_e| {
                                   #[cfg(feature = "trace")]
                                   error!("Failed to acquire write lock for Context");
 
@@ -202,7 +202,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
                 debug!("Rendering complete. Swapping buffers to put new graphics on screen.");
 
                 context.write()
-                    .map_err(|e| {
+                    .map_err(|_e| {
                         #[cfg(feature = "trace")]
                         error!("Failed to acquire write lock for context");
 
@@ -213,7 +213,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
 
                 // Exit if finished
                 if game.is_finished(ecs.write()
-                    .map_err(|e| {
+                    .map_err(|_e| {
                         #[cfg(feature = "trace")]
                         error!("Failed to acquire write lock for World");
 

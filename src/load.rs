@@ -140,7 +140,7 @@ pub fn load_deserializable_from_file<T: for<'de> Deserialize<'de> + Debug>(file_
 
         return Err( LoadIDError {
                 actual: json_value.load_type_id,
-                expected: file_id.to_string(),
+                expected: load_id.to_string(),
             })
     }
 

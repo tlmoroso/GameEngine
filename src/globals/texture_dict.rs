@@ -61,7 +61,7 @@ impl TextureDictLoader {
         let path = file_path
             .as_ref()
             .to_str()
-            .ok_or_else(|e| {
+            .ok_or_else(|| {
                 #[cfg(feature = "trace")]
                 error!("Failed to convert file path into string.");
 
@@ -99,7 +99,7 @@ impl TextureDictLoader {
             let mut texture_dict = HashMap::new();
 
             let mut ctx = context.write()
-                .map_err(|e| {
+                .map_err(|_e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to acquire write lock for World");
 

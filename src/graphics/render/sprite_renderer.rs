@@ -29,10 +29,10 @@ use specs::{World, Write, Join, WriteStorage, ReadStorage};
 use crate::graphics::texture::TextureHandle;
 use crate::graphics::transform::Transform;
 use crate::globals::texture_dict::TextureDict;
-use crate::graphics::render::sprite_renderer::SpriteRenderError::{FailedToBind, TessRenderError, RenderGateError, ShaderProgramBuildError};
+use crate::graphics::render::sprite_renderer::SpriteRenderError::{FailedToBind, TessRenderError, RenderGateError};
 
 use thiserror::Error;
-use luminance_front::tess::{Interleaved, TessError};
+use luminance_front::tess::{Interleaved, TessError, Deinterleaved, DeinterleavedData};
 use std::ops::DerefMut;
 use luminance_glfw::GL33Context;
 use glam::Mat4;
@@ -45,7 +45,7 @@ use tracing::{debug, error, instrument};
 
 use crate::loading::DrawTask;
 use luminance_front::vertex::Semantics;
-use luminance::tess::TessVertexData;
+use luminance::tess::{TessVertexData, TessIndex};
 use crate::load::{load_deserializable_from_file, LoadError};
 use crate::graphics::tess::TessLoader;
 use luminance::blending::BlendingMode;
@@ -54,23 +54,11 @@ use luminance::face_culling::FaceCulling;
 use luminance::scissor::ScissorRegion;
 use crate::graphics::render::sprite_renderer::SpriteRendererLoadError::{DeserializeError, TessLoadError, ShaderLoadError};
 use crate::graphics::shader::ShaderLoader;
+use crate::graphics::render::{Renderer, ShaderTypes};
+use std::marker::PhantomData;
+use crate::graphics::render::deserializations::RenderStateDef;
 
 pub const RENDER_STATE_LOAD_ID: &str = "render_state";
-
-#[derive(Deserialize)]
-#[serde(remote = "RenderState")]
-struct RenderStateDef {
-    /// Blending configuration.
-    blending: Option<BlendingMode>,
-    /// Depth test configuration.
-    depth_test: Option<DepthComparison>,
-    /// Depth write configuration.
-    depth_write: DepthWrite,
-    /// Face culling configuration.
-    face_culling: Option<FaceCulling>,
-    /// Scissor region configuration.
-    scissor: Option<ScissorRegion>,
-}
 
 #[cfg_attr(feature = "trace", instrument)]
 pub fn default_sprite_render_state() -> RenderState {
@@ -98,7 +86,6 @@ pub struct DefaultSpriteShaderUniform {
     view: Uniform<[[f32; 4]; 4]>,
     /// MODEL matrix in MVP
     model: Uniform<[[f32; 4]; 4]>,
-
     /// Texture for the texture.
     tex: Uniform<TextureBinding<Dim2, Unsigned>>,
 }
@@ -109,7 +96,7 @@ pub struct SpriteRendererLoader {
     path: String
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct SpriteRendererJSON {
     render_state_path: String,
     tess_path: String,
@@ -123,11 +110,12 @@ impl SpriteRendererLoader {
         }
     }
 
-    pub fn load<T: TessTypes, S: ShaderTypes>(&self) -> DrawTask<SpriteRenderer<T,S>> {
-        DrawTask::new(|(ecs, context)| {
+    pub fn load(&self) -> DrawTask<SpriteRenderer> {
+        let path = self.path.clone();
+
+        DrawTask::new(move |(ecs, context)| {
             #[cfg(feature = "trace")]
-            debug!("Loading Sprite Renderer from file: {:?}", self.path.clone());
-            let path = self.path.clone();
+            debug!("Loading Sprite Renderer from file: {:?}", path.clone());
 
             let json: SpriteRendererJSON = load_deserializable_from_file(&path, SPRITE_RENDERER_LOAD_ID)
                 .map_err(|e| {
@@ -142,7 +130,7 @@ impl SpriteRendererLoader {
             #[cfg(feature = "trace")]
             debug!("Loaded json from file: {:?}", json.clone());
 
-            let render_state: RenderState = load_deserializable_from_file(&json.render_state_path, RENDER_STATE_LOAD_ID)
+            let render_state: RenderStateDef = load_deserializable_from_file(&json.render_state_path, RENDER_STATE_LOAD_ID)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to deserialize Render State from file: {:?}", json.render_state_path.clone());
@@ -152,10 +140,12 @@ impl SpriteRendererLoader {
                         path: json.render_state_path.clone()
                     }
                 })?;
+            let render_state: RenderState = RenderState::from(render_state);
+
             #[cfg(feature = "trace")]
             debug!("Loaded Render State: ({:?}) from file: {:?}", render_state.clone(), json.render_state_path.clone());
 
-            let tess = TessLoader::new(json.tess_path)
+            let tess = TessLoader::new(json.tess_path.clone())
                 .load()
                 .execute((ecs.clone(), context.clone()))
                 .map_err(|e| {
@@ -170,7 +160,7 @@ impl SpriteRendererLoader {
             #[cfg(feature = "trace")]
             debug!("Loaded Tess from file: {:?}", json.tess_path.clone());
 
-            let shader = ShaderLoader::new(json.shader_path)
+            let shader = ShaderLoader::new(json.shader_path.clone())
                 .load()
                 .execute((ecs, context))
                 .map_err(|e| {
@@ -188,7 +178,8 @@ impl SpriteRendererLoader {
             Ok(SpriteRenderer {
                 render_state,
                 tess,
-                shader
+                shader,
+                // context: PhantomData
             })
         })
     }
@@ -218,30 +209,31 @@ pub enum SpriteRendererLoadError {
     }
 }
 
-pub trait ShaderTypes {
-    type Semantics: Semantics;
-    type UniformInterface: UniformInterface<Self::Shader>;
-    type Shader: Shader;
-}
-
-pub trait TessTypes {
-    type Vertex: TessVertexData<Self::Storage>;
-    type Instance: TessVertexData<Self::Storage>;
-    type Storage: ?Sized;
-}
-
-pub struct SpriteRenderer<T,S>
-    where T: TessTypes,
-          S: ShaderTypes
-{
+pub struct SpriteRenderer {
     pub render_state: RenderState,
-    pub tess: Tess<T::Vertex,(),T::Instance,T::Storage>,
-    pub shader: Program<S::Semantics, Out, S::UniformInterface>,
+    pub tess: Tess<(),(),(),Interleaved>,
+    pub shader: Program<(), (), DefaultSpriteShaderUniform>,
 }
 
-impl<T: TessTypes,S:ShaderTypes> SpriteRenderer<T,S> {
+impl ShaderTypes for SpriteRenderer {
+    type Semantics = ();
+    type ReturnValue = ();
+    type UniformInterface = DefaultSpriteShaderUniform;
+}
+
+impl Renderer for SpriteRenderer {
+    type S = Self;
+
     #[cfg_attr(feature = "trace", instrument(skip(shader, tess)))]
-    pub fn new(shader: Program<Sem, Out, Uni>, tess: Tess<V>, state: RenderState) -> SpriteRenderer<T,S> {
+    fn new(
+        shader: Program<
+            <<Self as Renderer>::S as ShaderTypes>::Semantics,
+            <<Self as Renderer>::S as ShaderTypes>::ReturnValue,
+            <<Self as Renderer>::S as ShaderTypes>::UniformInterface
+        >,
+        tess: Tess<(),(),(),Interleaved>,
+        state: RenderState
+    ) -> SpriteRenderer {
         SpriteRenderer {
             render_state: state,
             tess,
@@ -250,7 +242,7 @@ impl<T: TessTypes,S:ShaderTypes> SpriteRenderer<T,S> {
     }
 
     #[cfg_attr(feature = "trace", instrument(skip(self, pipeline, shd_gate, world)))]
-    pub fn render(
+    fn render(
         &mut self,
         pipeline: &Pipeline,
         shd_gate: &mut ShadingGate,
@@ -258,7 +250,11 @@ impl<T: TessTypes,S:ShaderTypes> SpriteRenderer<T,S> {
         view: &Mat4,
         world: &World,
     ) -> Result<(), SpriteRenderError> {
-        shd_gate.shade(&mut self.shader, |mut iface, uni, mut rdr_gate| {
+        let shader = &mut self.shader;
+        let tess = &self.tess;
+        let render_state = &self.render_state;
+
+        shd_gate.shade(shader, |mut iface, uni, mut rdr_gate| {
             #[cfg(feature = "trace")]
             debug!("Entering shading gate.");
 
@@ -296,11 +292,11 @@ impl<T: TessTypes,S:ShaderTypes> SpriteRenderer<T,S> {
                     #[cfg(feature = "trace")]
                     debug!("Successfully bound texture. Setting texture and model matrix for uniform.");
 
-                    rdr_gate.render(&self.render_state, |mut tess_gate| {
+                    rdr_gate.render(render_state, |mut tess_gate| {
                         #[cfg(feature = "trace")]
                         debug!("Entering render gate.");
 
-                        tess_gate.render(&self.tess)
+                        tess_gate.render(tess)
                             .map_err(|e| {
                                 #[cfg(feature = "trace")]
                                 error!("Failed to call render on tess gate.");
@@ -352,15 +348,6 @@ pub enum SpriteRenderError {
     #[error("An error occurred while rendering the render gate")]
     RenderGateError {
         source: Box<SpriteRenderError>
-    },
-
-    #[error("Failed to build new shader program from shaders. VertexShader: ({vs}), TessShader: ({ts}), GeometryShader: ({gs}), FragmentShader: {fs} ")]
-    ShaderProgramBuildError {
-        source: ProgramError,
-        vs: String,
-        ts: String,
-        gs: String,
-        fs: String
     }
 }
 

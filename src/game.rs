@@ -42,7 +42,7 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
         debug!("ENTER: Game::load");
         T::register_components(
             ecs.write()
-                .map_err(|e| {
+                .map_err(|_e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to acquire write lock for World");
 
@@ -60,7 +60,7 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
         debug!("SceneStack loaded from GameWrapper: {:?}", scene_stack);
 
         ecs.write()
-           .map_err(|e| { WorldWriteLockError })?
+           .map_err(|_e| { WorldWriteLockError })?
            .maintain();
         #[cfg(feature="trace")]
         debug!("World maintained after loading");

@@ -72,7 +72,7 @@ impl EntityLoader {
             debug!("Entity JSON value loaded from file: {:?}", file_path.clone());
 
             let ecs = world.read()
-                .map_err(|e| {
+                .map_err(|_e| {
                     #[cfg(feature = "trace")]
                     debug!("Error acquiring write lock for World");
 

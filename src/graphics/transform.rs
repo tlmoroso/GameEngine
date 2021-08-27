@@ -105,11 +105,11 @@ impl ComponentLoader for TransformLoader {
             self.json = load_deserializable_from_json(&new_value, &TRANSFORM_LOAD_ID)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
-                    error!("Failed to convert JSONLoad object: ({:?}) into TransformJSON value", json.clone());
+                    error!("Failed to convert JSONLoad object: ({:?}) into TransformJSON value", new_value.clone());
 
                     DeserializeError {
                         source: e,
-                        json: json.clone()
+                        json: new_value.clone()
                     }
                 })?;
             #[cfg(feature = "trace")]
@@ -120,10 +120,10 @@ impl ComponentLoader for TransformLoader {
             #[cfg(feature = "trace")]
             error!("Given load-type ID: ({:?}) does not match expected ID: {:?}", new_value.load_type_id.clone(), TRANSFORM_LOAD_ID.to_string());
 
-            LoadTypeIDError {
+           Err(Error::new(LoadTypeIDError {
                 actual: new_value.load_type_id,
                 expected: TRANSFORM_LOAD_ID.to_string()
-            }
+            }))
         }
     }
 
@@ -135,7 +135,7 @@ impl ComponentLoader for TransformLoader {
 
 #[derive(Error, Debug)]
 pub enum TransformLoaderError {
-    #[error("Failed to convert JSONLoad object: ({json}) to TransformJSON value")]
+    #[error("Failed to convert JSONLoad object: ({json:?}) to TransformJSON value")]
     DeserializeError {
         source: LoadError,
         json: JSONLoad

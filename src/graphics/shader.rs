@@ -1,31 +1,35 @@
-use luminance_front::shader::Program;
+use luminance_front::shader::{Program, UniformInterface, TessellationStages, ProgramError};
 use crate::loading::{GenTask, DrawTask};
 use crate::load::{load_deserializable_from_file, LoadError};
 use thiserror::Error;
 
 #[cfg(feature="trace")]
 use tracing::{instrument, error, debug};
-use crate::graphics::shader::ShaderLoadError::{DeserializeError, ContextWriteError, FileReadError};
+use crate::graphics::shader::ShaderLoadError::{DeserializeError, ContextWriteError, FileReadError, ShaderProgramBuildError};
 use luminance::context::GraphicsContext;
-use crate::graphics::render::sprite_renderer::SpriteRenderError::ShaderProgramBuildError;
 use std::fs::read_to_string;
-use crate::graphics::render::sprite_renderer::DefaultShaderUniform;
+use crate::graphics::render::sprite_renderer::{DefaultSpriteShaderUniform};
 use serde::Deserialize;
+use luminance_front::vertex::Semantics;
+use std::marker::PhantomData;
+use luminance::backend::shader::Shader;
 
 pub const SHADER_LOAD_ID: &str = "shader";
 
-const VS: &'static str = include_str!("../texture-vs.glsl");
-const FS: &'static str = include_str!("../texture-fs.glsl");
+const VS: &'static str = include_str!("./texture-vs.glsl");
+const FS: &'static str = include_str!("./texture-fs.glsl");
 
 pub struct ShaderLoader {
-    path: String
+    path: String,
+    // context: PhantomData<B>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ShaderJSON {
     vertex: String,
-    tess: String,
-    geometry: String,
+    tess_control: Option<String>,
+    tess_eval: Option<String>,
+    geometry: Option<String>,
     fragment: String,
 }
 
@@ -33,14 +37,19 @@ impl ShaderLoader {
     #[cfg_attr(feature = "trace", instrument)]
     pub fn new(file_path: String) -> Self {
         Self {
-            path: file_path
+            path: file_path,
+            // context: PhantomData,
         }
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    pub fn load<Sem, Out, Uni>(&self) -> DrawTask<Program<Sem, Out, Uni>> {
-        DrawTask::new(|(ecs, context)| {
-            let path = self.path.clone();
+    pub fn load<Sem, Out, Uni>(&self) -> DrawTask<Program<Sem, Out, Uni>>
+        where Sem: 'static + Semantics,
+              Out: 'static,
+              Uni: 'static + UniformInterface<luminance_front::Backend> {
+        let path = self.path.clone();
+
+        DrawTask::new(move |(_ecs, context)| {
             #[cfg(feature = "trace")]
             debug!("Loading Shader Program from file: {:?}", path.clone());
 
@@ -75,29 +84,74 @@ impl ShaderLoader {
             #[cfg(feature = "trace")]
             debug!("Read in Fragment Shader from file: {:?}", json.fragment.clone());
 
-            let ts = read_to_string(json.tess.clone())
-                .map_err(|e| {
-                    #[cfg(feature = "trace")]
-                    error!("Failed to read Tess Shader file: {:?}", json.tess.clone());
+            let ts_c =
+                if let Some(path) = &json.tess_control {
+                    read_to_string(path)
+                        .map_err(|e| {
+                            #[cfg(feature = "trace")]
+                            error!("Failed to read Tess Control Shader file: {:?}", path.clone());
 
-                    FileReadError {
-                        source: e,
-                        path: json.tess.clone()
-                    }
-                })?;
+                            FileReadError {
+                                source: e,
+                                path: path.clone()
+                            }
+                        })?
+                } else {
+                    String::new()
+                };
             #[cfg(feature = "trace")]
-            debug!("Read in Tess Shader from file: {:?}", json.tess.clone());
+            debug!("Read in Tess Control Shader from file: {:?}", json.tess_control.clone());
 
-            let gs = read_to_string(json.geometry.clone())
-                .map_err(|e| {
-                    #[cfg(feature = "trace")]
-                    error!("Failed to read Geometry Shader file: {:?}", json.geometry.clone());
+            let ts_e =
+                if let Some(path) = &json.tess_eval {
+                    read_to_string(path)
+                        .map_err(|e| {
+                            #[cfg(feature = "trace")]
+                            error!("Failed to read Tess Eval Shader file: {:?}", path.clone());
 
-                    FileReadError {
-                        source: e,
-                        path: json.geometry.clone()
-                    }
-                })?;
+                            FileReadError {
+                                source: e,
+                                path: path.clone()
+                            }
+                        })?
+                } else {
+                    String::new()
+                };
+            #[cfg(feature = "trace")]
+            debug!("Read in Tess Evaluation Shader from file: {:?}", json.tess_eval.clone());
+
+            let tess_stages =
+                if json.tess_control.is_some() && json.tess_eval.is_some() {
+                    Some(TessellationStages {
+                        control: ts_c.as_str(),
+                        evaluation: ts_e.as_str()
+                    })
+                } else {
+                    None
+                };
+
+            let geometry_shader =
+                if let Some(path) = &json.geometry {
+                    read_to_string(path)
+                        .map_err(|e| {
+                            #[cfg(feature = "trace")]
+                            error!("Failed to read Geometry Shader file: {:?}", json.geometry);
+
+                            FileReadError {
+                                source: e,
+                                path: path.clone()
+                            }
+                        })?
+                } else {
+                    String::new()
+                };
+            let gs =
+                if json.geometry.is_some() {
+                    Some(geometry_shader.as_str())
+                } else {
+                    None
+                };
+
             #[cfg(feature = "trace")]
             debug!("Read in Geometry Shader from file: {:?}", json.geometry.clone());
 
@@ -115,7 +169,7 @@ impl ShaderLoader {
             debug!("Read in Vertex Shader from file: {:?}", json.vertex.clone());
 
             Ok(context.new_shader_program()
-                .from_strings(&vs, ts, gs, &fs)
+                .from_strings(&vs, tess_stages, gs, &fs)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to create Shader Program from Shader files");
@@ -123,7 +177,8 @@ impl ShaderLoader {
                     ShaderProgramBuildError {
                         source: e,
                         vs: json.vertex.clone(),
-                        ts: json.tess.clone(),
+                        ts_c: json.tess_control.clone(),
+                        ts_e: json.tess_eval.clone(),
                         gs: json.geometry.clone(),
                         fs: json.fragment.clone()
                     }
@@ -133,8 +188,16 @@ impl ShaderLoader {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    pub fn load_default() -> DrawTask<Program<(), (), DefaultShaderUniform>> {
-        DrawTask::new(|(ecs, context)| {
+    pub fn load_default() -> DrawTask<Program<(), (), DefaultSpriteShaderUniform>> {
+        DrawTask::new(|(_ecs, context)| {
+            let mut context = context.write()
+                .map_err(|_e| {
+                    #[cfg(feature = "trace")]
+                    debug!("Failed to acquire write lock for context");
+
+                    ContextWriteError
+                })?;
+
             Ok(context
                 .new_shader_program()
                 .from_strings(VS, None, None, FS)
@@ -145,8 +208,9 @@ impl ShaderLoader {
                     ShaderProgramBuildError {
                         source: e,
                         vs: VS.to_string(),
-                        ts: String::from(""),
-                        gs: String::from(""),
+                        ts_c: None,
+                        ts_e: None,
+                        gs: None,
                         fs: FS.to_string()
                     }
                 })?
@@ -170,5 +234,15 @@ pub enum ShaderLoadError {
     FileReadError {
         source: std::io::Error,
         path: String
+    },
+
+    #[error("Failed to build new shader program from shaders.\n \tVertexShader:\n \t({vs:?}),\n \tTessControlShader: ({ts_c:?}),\n \tTessEvalShader: ({ts_e:?}),\n \tGeometryShader: ({gs:?}),\n \tFragmentShader: {fs:?} ")]
+    ShaderProgramBuildError {
+        source: ProgramError,
+        vs: String,
+        ts_c: Option<String>,
+        ts_e: Option<String>,
+        gs: Option<String>,
+        fs: String
     }
 }
