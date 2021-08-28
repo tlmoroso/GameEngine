@@ -56,9 +56,7 @@ use crate::graphics::render::sprite_renderer::SpriteRendererLoadError::{Deserial
 use crate::graphics::shader::ShaderLoader;
 use crate::graphics::render::{Renderer, ShaderTypes};
 use std::marker::PhantomData;
-use crate::graphics::render::deserializations::RenderStateDef;
-
-pub const RENDER_STATE_LOAD_ID: &str = "render_state";
+use crate::graphics::render::deserializations::{RenderStateDef, RENDER_STATE_LOAD_ID};
 
 #[cfg_attr(feature = "trace", instrument)]
 pub fn default_sprite_render_state() -> RenderState {
@@ -93,10 +91,10 @@ pub struct DefaultSpriteShaderUniform {
 pub const SPRITE_RENDERER_LOAD_ID: &str = "sprite_renderer";
 
 pub struct SpriteRendererLoader {
-    path: String
+    pub path: String
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct SpriteRendererJSON {
     render_state_path: String,
     tess_path: String,
@@ -179,9 +177,23 @@ impl SpriteRendererLoader {
                 render_state,
                 tess,
                 shader,
-                // context: PhantomData
             })
         })
+    }
+
+    pub fn load_default() -> DrawTask<SpriteRenderer> {
+        let render_state = default_sprite_render_state();
+        TessLoader::load_default()
+            .join(ShaderLoader::load_default(), |tess_and_shader| tess_and_shader )
+            .map(|(tess, shader), _| {
+                Ok(
+                    SpriteRenderer {
+                        render_state,
+                        tess,
+                        shader
+                    }
+                )
+            })
     }
 }
 
@@ -224,21 +236,11 @@ impl ShaderTypes for SpriteRenderer {
 impl Renderer for SpriteRenderer {
     type S = Self;
 
-    #[cfg_attr(feature = "trace", instrument(skip(shader, tess)))]
-    fn new(
-        shader: Program<
-            <<Self as Renderer>::S as ShaderTypes>::Semantics,
-            <<Self as Renderer>::S as ShaderTypes>::ReturnValue,
-            <<Self as Renderer>::S as ShaderTypes>::UniformInterface
-        >,
-        tess: Tess<(),(),(),Interleaved>,
-        state: RenderState
-    ) -> SpriteRenderer {
-        SpriteRenderer {
-            render_state: state,
-            tess,
-            shader,
-        }
+    #[cfg_attr(feature = "trace", instrument)]
+    fn load(path: String) -> DrawTask<Self> {
+        let loader = SpriteRendererLoader::new(path);
+
+        loader.load()
     }
 
     #[cfg_attr(feature = "trace", instrument(skip(self, pipeline, shd_gate, world)))]

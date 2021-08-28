@@ -37,7 +37,7 @@ pub const IMAGES_DIR: &str = "images/";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct TextureDictLoader {
-    json: TextureDictJSON
+    path: String
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -55,46 +55,31 @@ impl TextureDictLoader {
         depth_comparison: Some(DepthComparison::Less)
     };
 
-    #[cfg_attr(feature="trace", instrument(skip(file_path)))]
-    pub fn new(file_path: &impl AsRef<Path>) -> Result<Self> {
-        // Accept anything that can be interpreted as a Path, then convert it to a String for easier use
-        let path = file_path
-            .as_ref()
-            .to_str()
-            .ok_or_else(|| {
-                #[cfg(feature = "trace")]
-                error!("Failed to convert file path into string.");
-
-                PathConversionFailed
-            })?
-            .to_string(); // Maybe there's a better way to do this?
-
-        let json = load_deserializable_from_file(&path, TEXTURE_DICT_LOAD_ID)
-            .map_err(|e| {
-                #[cfg(feature = "trace")]
-                error!("Failed to deserialize file: ({:?}) into TextureDict JSON value", path.clone());
-
-                TextureDictFileLoadError {
-                    path: path.clone(),
-                    source: e
-                }
-            })?;
-
-        let new = Self {
-            json
-        };
-
-        #[cfg(feature = "trace")]
-        debug!("Successfully created new TextureDictLoader: {:?}", new.clone());
-
-        return Ok(new)
+    #[cfg_attr(feature="trace", instrument)]
+    pub fn new(file_path: String) -> Self {
+        Self {
+            path: file_path
+        }
     }
 
     #[cfg_attr(feature="trace", instrument)]
     pub fn load(self) -> DrawTask<TextureDict> {
+        let path = self.path.clone();
+
         DrawTask::new(move |(_, context)| {
+            let json: TextureDictJSON = load_deserializable_from_file(&path, TEXTURE_DICT_LOAD_ID)
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to deserialize file: ({:?}) into TextureDict JSON value", path.clone());
+
+                    TextureDictFileLoadError {
+                        path: path.clone(),
+                        source: e
+                    }
+                })?;
+
             #[cfg(feature="trace")]
-            trace!("ImageDictJSON: ({:#?}) successfully loaded from: {:#?}", self.json.clone(), path.clone());
+            trace!("ImageDictJSON: ({:#?}) successfully loaded from: {:#?}", json.clone(), path.clone());
 
             let mut texture_dict = HashMap::new();
 
@@ -106,7 +91,7 @@ impl TextureDictLoader {
                     WorldWriteLockError
                 })?;
 
-            for (image_name, image_path) in self.json.textures {
+            for (image_name, image_path) in json.textures {
                 #[cfg(feature="trace")]
                 debug!("Adding {:#?} at {:#?} to new TextureDict", image_name.clone(), image_path.clone());
 

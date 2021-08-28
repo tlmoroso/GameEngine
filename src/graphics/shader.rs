@@ -19,9 +19,9 @@ pub const SHADER_LOAD_ID: &str = "shader";
 const VS: &'static str = include_str!("./texture-vs.glsl");
 const FS: &'static str = include_str!("./texture-fs.glsl");
 
+#[derive(Debug, Clone)]
 pub struct ShaderLoader {
     path: String,
-    // context: PhantomData<B>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

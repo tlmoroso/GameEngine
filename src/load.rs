@@ -13,10 +13,11 @@ use tracing::{instrument, trace, debug, error};
 use specs::{World, Entity};
 
 use crate::entities::{EntityLoader};
-use crate::load::LoadError::{JSONLoadConversionError, ValueConversionError, ReadError, LoadIDError, DeserializationError};
+use crate::load::LoadError::{JSONLoadConversionError, ValueConversionError, ReadError, LoadIDError, DeserializationError, ExecutionError};
 use crate::components::ComponentMux;
 use std::fmt::Debug;
 use crate::loading::{Task, DrawTask};
+use luminance_glfw::GL33Context;
 
 pub const LOAD_PATH: &str = "assets/JSON/";
 pub const JSON_FILE: &str = ".json";
@@ -88,37 +89,34 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
     return load_json;
 }
 
-#[cfg_attr(feature="trace", instrument)]
-pub fn load_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>) -> DrawTask<Vec<Entity>> {
-    #[cfg(feature = "trace")]
-    debug!("ENTER: load_entity_vec");
-
-    let mut entity_task = DrawTask::new(|(_ecs, _context)| {Ok(
-        Vec::new()
-    )});
+#[cfg_attr(feature="trace", instrument(skip(ecs, context)))]
+pub fn create_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>, ecs: Arc<RwLock<World>>, context: Arc<RwLock<GL33Context>>) -> Result<Vec<Entity>, LoadError> {
+    let mut entity_vec = Vec::new();
 
     for entity_path in entity_paths {
         #[cfg(feature = "trace")]
         debug!("Loading entity from: {:?}", entity_path.clone());
 
-        let path = entity_path.clone();
-        let entity_loader = EntityLoader::new(path);
-        let other = entity_loader.load_entity::<T>();
-        #[cfg(feature = "trace")]
-        debug!("Entity Task created");
+        let entity = EntityLoader::new(entity_path.clone())
+            .load_entity::<T>()
+            .execute((ecs.clone(), context.clone()))
+            .map_err(|e| {
+                #[cfg(feature = "trace")]
+                debug!("A failure occurred during execution of the entity task");
 
-        entity_task = entity_task.join(other, |(mut entity_vec, entity)| {
-            entity_vec.push(entity);
-            entity_vec
-        });
+                ExecutionError {
+                    source: e
+                }
+            })?;
+        #[cfg(feature = "trace")]
+        debug!("Entity loaded");
+
+        entity_vec.push(entity);
         #[cfg(feature = "trace")]
         debug!("Entity appended to vec");
     }
 
-    #[cfg(feature = "trace")]
-    debug!("EXIT: load_entity_vec");
-
-    return entity_task
+    return Ok(entity_vec)
 }
 
 #[cfg_attr(feature="trace", instrument)]
@@ -213,6 +211,10 @@ pub enum LoadError {
     DeserializationError {
         value: Value,
         source: serde_json::error::Error
+    },
+    #[error("Failed to execute task")]
+    ExecutionError {
+        source: anyhow::Error
     }
 }
 

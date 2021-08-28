@@ -9,6 +9,8 @@ use luminance_front::{
 use luminance_front::face_culling::{FaceCullingOrder, FaceCullingMode};
 use luminance_front::render_state::RenderState;
 
+pub const RENDER_STATE_LOAD_ID: &str = "render_state";
+
 #[derive(Deserialize, Clone, Debug)]
 pub(crate) struct RenderStateDef {
     /// Blending configuration.

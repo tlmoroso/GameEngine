@@ -54,9 +54,6 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
             scene_factory
         };
 
-        #[cfg(feature="trace")]
-        debug!("Returning new SceneStackLoader: {:?}", new.clone());
-
         return new
     }
 

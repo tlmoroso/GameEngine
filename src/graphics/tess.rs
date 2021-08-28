@@ -74,7 +74,6 @@ impl TessLoader {
                     ContextWriteError
                 })?;
 
-            // return if json.is_interleaved {
             #[cfg(feature = "trace")]
             debug!("Tess has interleaved storage.");
 
@@ -102,24 +101,6 @@ impl TessLoader {
                 tess_builder = tess_builder.set_render_instance_nb(render_instance_nb)
             }
 
-            // if let Some(vertices) = vertices {
-            // #[cfg(feature = "trace")]
-            // debug!("Adding vertices to the Tess: {:?}", vertices.clone());
-
-            // tess_builder = tess_builder.set_vertices(vertices);
-            // }
-            // if let Some(instances) = instances {
-            // #[cfg(feature = "trace")]
-            // debug!("Adding instances to the Tess: {:?}", instances.clone());
-
-            // tess_builder = tess_builder.set_instances(instances);
-            // }
-            // if let Some(indices) = json.indices {
-            //     #[cfg(feature = "trace")]
-            //     debug!("Adding indices to the Tess: {:?}", indices.clone());
-            //
-            //     tess_builder = tess_builder.set_indices(indices)
-            // }
             tess_builder.build()
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -129,55 +110,6 @@ impl TessLoader {
                         source: e
                     })
                 })
-            // }
-            // else {
-            //     #[cfg(feature = "trace")]
-            //     debug!("Tess has deinterleaved storage");
-            //
-            //     let mut tess_builder = context.new_deinterleaved_tess();
-            //     #[cfg(feature = "trace")]
-            //     debug!("Created Tess builder");
-            //
-            //     if let Some(mode) = json.mode {
-            //         #[cfg(feature = "trace")]
-            //         debug!("Set Tess mode: {:?}", mode.clone());
-            //
-            //         tess_builder = tess_builder.set_mode(mode)
-            //     }
-            //     if let Some(render_vertex_nb) = json.render_vertices_len {
-            //         #[cfg(feature = "trace")]
-            //         debug!("Setting default number of vertices to render: {:?}", render_vertex_nb);
-            //
-            //         tess_builder = tess_builder.set_render_vertex_nb(render_vertex_nb)
-            //     }
-            //     if let Some(render_instance_nb) = json.render_instances_len {
-            //         #[cfg(feature = "trace")]
-            //         debug!("Setting default number of instances to render: {:?}", render_instance_nb);
-            //
-            //         tess_builder = tess_builder.set_render_instance_nb(render_instance_nb)
-            //     }
-            //     if let Some(attributes) = json.attributes {
-            //         #[cfg(feature = "trace")]
-            //         debug!("Adding attributes to Tess: {:?}", attributes.clone());
-            //
-            //         tess_builder = tess_builder.set_attributes(attributes)
-            //     }
-            //     if let Some(instance_attributes) = json.instance_attributes {
-            //         #[cfg(feature = "trace")]
-            //         debug!("Adding instance attributes to Tess: {:?}", instance_attributes.clone());
-            //
-            //         tess_builder = tess_builder.set_instance_attributes(instance_attributes)
-            //     }
-            //     tess_builder.build()
-            //         .map_err(|e| {
-            //             #[cfg(feature = "trace")]
-            //             error!("Failed to build Tess");
-            //
-            //             Error::new(TessBuildError {
-            //                 source: e
-            //             })
-            //         })
-            // }
         })
     }
 
