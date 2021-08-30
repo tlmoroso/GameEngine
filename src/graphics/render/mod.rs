@@ -32,7 +32,6 @@ pub trait Renderer {
         pipeline: &Pipeline,
         shd_gate: &mut ShadingGate,
         proj_matrix: &Mat4,
-        view: &Mat4,
         world: &World,
     ) -> Result<<<Self as Renderer>::S as ShaderTypes>::ReturnValue, SpriteRenderError>;
 }

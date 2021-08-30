@@ -24,12 +24,12 @@ use luminance::backend::shader::Shader;
 
 use serde::Deserialize;
 
-use specs::{World, Write, Join, WriteStorage, ReadStorage};
+use specs::{World, Write, Join, WriteStorage, ReadStorage, Read};
 
 use crate::graphics::texture::TextureHandle;
 use crate::graphics::transform::Transform;
 use crate::globals::texture_dict::TextureDict;
-use crate::graphics::render::sprite_renderer::SpriteRenderError::{FailedToBind, TessRenderError, RenderGateError};
+use crate::graphics::render::sprite_renderer::SpriteRenderError::{FailedToBind, TessRenderError, RenderGateError, CameraDNE};
 
 use thiserror::Error;
 use luminance_front::tess::{Interleaved, TessError, Deinterleaved, DeinterleavedData};
@@ -57,6 +57,8 @@ use crate::graphics::shader::ShaderLoader;
 use crate::graphics::render::{Renderer, ShaderTypes};
 use std::marker::PhantomData;
 use crate::graphics::render::deserializations::{RenderStateDef, RENDER_STATE_LOAD_ID};
+use crate::camera::Camera;
+use std::sync::{Arc, RwLock};
 
 #[cfg_attr(feature = "trace", instrument)]
 pub fn default_sprite_render_state() -> RenderState {
@@ -249,7 +251,6 @@ impl Renderer for SpriteRenderer {
         pipeline: &Pipeline,
         shd_gate: &mut ShadingGate,
         proj_matrix: &Mat4,
-        view: &Mat4,
         world: &World,
     ) -> Result<(), SpriteRenderError> {
         let shader = &mut self.shader;
@@ -260,14 +261,16 @@ impl Renderer for SpriteRenderer {
             #[cfg(feature = "trace")]
             debug!("Entering shading gate.");
 
-            iface.set(&uni.projection, proj_matrix.to_cols_array_2d());
-            iface.set(&uni.view, view.to_cols_array_2d());
-            #[cfg(feature = "trace")]
-            debug!("Setting uniform values for projection and view matrices using ProgramInterface");
-
-            let (mut textures, transforms, mut texture_dict): (WriteStorage<TextureHandle>, ReadStorage<Transform>, Write<TextureDict>) = world.system_data();
+            let (mut textures, transforms, mut texture_dict, mut camera): (WriteStorage<TextureHandle>, ReadStorage<Transform>, Write<TextureDict>, Write<Option<Box<dyn Camera>>>) = world.system_data();
             #[cfg(feature = "trace")]
             debug!("Getting all entities with a texture and transform component to draw. Also fetching TextureDict.");
+
+            let camera = camera.as_mut().ok_or(CameraDNE)?;
+
+            iface.set(&uni.projection, proj_matrix.to_cols_array_2d());
+            iface.set(&uni.view, camera.view().to_cols_array_2d());
+            #[cfg(feature = "trace")]
+            debug!("Setting uniform values for projection and view matrices using ProgramInterface");
 
             for (tex_handle, transform) in (&mut textures, &transforms).join() {
                 #[cfg(feature = "trace")]
@@ -350,7 +353,9 @@ pub enum SpriteRenderError {
     #[error("An error occurred while rendering the render gate")]
     RenderGateError {
         source: Box<SpriteRenderError>
-    }
+    },
+    #[error("Failed to get camera from System Data.")]
+    CameraDNE,
 }
 
 impl From<PipelineError> for SpriteRenderError {
