@@ -1,5 +1,6 @@
 #[allow(non_snake_case)]
-pub mod top_down_2D;
+pub mod orthographic_camera;
+pub mod perspective_camera;
 
 use glam::{Mat4, Vec3};
 
