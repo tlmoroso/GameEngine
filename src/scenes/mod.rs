@@ -36,5 +36,6 @@ pub trait Scene<T: Input + Debug>: Debug {
 }
 
 pub trait SceneLoader<T: Input + Debug>: Debug {
+    // TODO: consider changing this to consume self so we don't have to worry about lifetimes in load functions.
     fn load_scene(&self) -> DrawTask<Box<dyn Scene<T>>>;
 }

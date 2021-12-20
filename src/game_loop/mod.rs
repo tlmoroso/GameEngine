@@ -145,6 +145,7 @@ impl<T: GameWrapper<U>, U: Input + Debug + 'static> GameLoop<T,U> {
 
                             GameInteractError { source: e }
                         })?;
+                        input.clear();
                     },
                     _ => ()
                 }

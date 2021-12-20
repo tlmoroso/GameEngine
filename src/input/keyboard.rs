@@ -36,6 +36,7 @@ impl KeyBoard {
         &self.pressed_keys
     }
 
+    #[allow(unused_braces)] // For some reason, the compiler does not like these braces in particular but they are necessary
     #[cfg_attr(feature = "trace", instrument)]
     pub fn get_char(&self) -> Character { self.new_char }
 }
