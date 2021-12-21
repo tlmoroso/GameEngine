@@ -1,7 +1,6 @@
 use anyhow::Result;
 use specs::World;
 use luminance_glfw::GL33Context;
-use crossbeam_epoch::Atomic;
 use std::sync::{Arc, Mutex, RwLock};
 
 #[cfg(feature = "trace")]

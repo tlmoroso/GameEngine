@@ -90,7 +90,7 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
 }
 
 #[cfg_attr(feature="trace", instrument(skip(ecs, context)))]
-pub fn create_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>, ecs: Arc<RwLock<World>>, context: Arc<RwLock<GL33Context>>) -> Result<Vec<Entity>, LoadError> {
+pub fn create_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>, ecs: Arc<RwLock<World>>) -> Result<Vec<Entity>, LoadError> {
     let mut entity_vec = Vec::new();
 
     for entity_path in entity_paths {
@@ -99,7 +99,7 @@ pub fn create_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>, 
 
         let entity = EntityLoader::new(entity_path.clone())
             .load_entity::<T>()
-            .execute((ecs.clone(), context.clone()))
+            .execute(ecs.clone())
             .map_err(|e| {
                 #[cfg(feature = "trace")]
                 debug!("A failure occurred during execution of the entity task");

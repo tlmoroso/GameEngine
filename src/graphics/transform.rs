@@ -81,7 +81,7 @@ impl ComponentLoader for TransformLoader {
     }
 
     #[cfg_attr(feature = "trace", instrument(skip(builder, _ecs)))]
-    fn load_component<'a>(&self, builder: LazyBuilder<'a>, _ecs: Arc<RwLock<World>>, _context: Option<Arc<RwLock<GL33Context>>>) -> anyhow::Result<LazyBuilder<'a>> {
+    fn load_component<'a>(&self, builder: LazyBuilder<'a>, _ecs: Arc<RwLock<World>>) -> anyhow::Result<LazyBuilder<'a>> {
         let transform = Transform {
             translation: Vec2::from(self.json.translation),
             scale: Vec2::from(self.json.scale),

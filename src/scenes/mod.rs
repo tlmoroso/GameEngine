@@ -12,7 +12,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::Value;
 use crate::input::Input;
-use crate::loading::DrawTask;
+use crate::loading::{DrawTask, GenTask};
 use luminance_glfw::GL33Context;
 
 pub mod scene_stack;
@@ -28,14 +28,14 @@ pub struct SceneLoaderJSON {
 
 pub trait Scene<T: Input + Debug>: Debug {
     // Instance Methods
-    fn update(&mut self, ecs: &mut World) -> Result<SceneTransition<T>>;
-    fn draw(&mut self, ecs: &mut World, context: &mut GL33Context) -> Result<()>;
-    fn interact(&mut self, ecs: &mut World, input: &T) -> Result<()>;
+    fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<SceneTransition<T>>;
+    fn draw(&mut self, ecs: Arc<RwLock<World>>) -> Result<()>;
+    fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &T) -> Result<()>;
     fn get_name(&self) -> String;
-    fn is_finished(&self, ecs: &mut World) -> Result<bool>;
+    fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool>;
 }
 
 pub trait SceneLoader<T: Input + Debug>: Debug {
     // TODO: consider changing this to consume self so we don't have to worry about lifetimes in load functions.
-    fn load_scene(&self) -> DrawTask<Box<dyn Scene<T>>>;
+    fn load_scene(&self) -> GenTask<Box<dyn Scene<T>>>;
 }

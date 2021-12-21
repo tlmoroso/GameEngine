@@ -25,6 +25,7 @@ use crate::globals::texture_dict::TextureDict;
 use crate::graphics::texture::TextureLoaderError::{CanNotDeserialize, ContextMissing, ContextWriteLockError, DecodeError, FileNameDNE, PathNotFile, PathStringConversion, ReaderFailedToOpen, RGB8ConversionFailed, TextureDictDNE, TextureDidNotLoad, WorldReadLockError};
 use crate::load::{JSONLoad, load_deserializable_from_json, LoadError};
 use crate::loading::DrawTask;
+use crate::graphics::Context;
 
 #[derive(Debug, Clone)]
 pub struct TextureHandle {
@@ -79,147 +80,135 @@ impl ComponentLoader for TextureLoader {
     }
 
     #[cfg_attr(feature = "trace", instrument(skip(builder, ecs, context)))]
-    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>, context: Option<Arc<RwLock<GL33Context>>>) -> Result<LazyBuilder<'a>> {
-        if let Some(context) = context {
+    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>) -> Result<LazyBuilder<'a>> {
+        let path = PathBuf::from(self.json.image_path.clone());
+
+        if !path.is_file() {
             #[cfg(feature = "trace")]
-            debug!("Context exists. Loading texture.");
+            error!("Given path: ({:?}) does not point to file", self.json.image_path.clone());
 
-            let path = PathBuf::from(self.json.image_path.clone());
+            return Err(anyhow::Error::new(PathNotFile { path: self.json.image_path.clone() }))
+        }
 
-            if !path.is_file() {
-                #[cfg(feature = "trace")]
-                error!("Given path: ({:?}) does not point to file", self.json.image_path.clone());
+        let name = if let Some(name) = self.json.name.clone() {
+            #[cfg(feature = "trace")]
+            debug!("Optional name was given for texture: {:?}", name.clone());
 
-                return Err(anyhow::Error::new(PathNotFile { path: self.json.image_path.clone() }))
-            }
-
-            let name = if let Some(name) = self.json.name.clone() {
-                #[cfg(feature = "trace")]
-                debug!("Optional name was given for texture: {:?}", name.clone());
-
-                name
-            } else {
-                let name = path.file_stem()
-                    .ok_or_else(|| {
-                        #[cfg(feature = "trace")]
-                        error!("Could not get file stem(a.k.a file name) of path: {:?}", self.json.image_path.clone());
-
-                        FileNameDNE {
-                            path: self.json.image_path.clone()
-                        }
-                    })?
-                    .to_string_lossy()
-                    .to_string();
-
-                #[cfg(feature = "trace")]
-                debug!("Name not given. Converted file name into image name: {:?}", name.clone());
-
-                name
-            };
-
-            let world = ecs.read()
-                .map_err(|_| {
+            name
+        } else {
+            let name = path.file_stem()
+                .ok_or_else(|| {
                     #[cfg(feature = "trace")]
-                    error!("Failed to acquire read lock for world");
+                    error!("Could not get file stem(a.k.a file name) of path: {:?}", self.json.image_path.clone());
 
-                    WorldReadLockError
+                    FileNameDNE {
+                        path: self.json.image_path.clone()
+                    }
+                })?
+                .to_string_lossy()
+                .to_string();
+
+            #[cfg(feature = "trace")]
+            debug!("Name not given. Converted file name into image name: {:?}", name.clone());
+
+            name
+        };
+
+        let world = ecs.read()
+            .map_err(|_| {
+                #[cfg(feature = "trace")]
+                error!("Failed to acquire read lock for world");
+
+                WorldReadLockError
+            })?;
+
+        let mut texture_dict = world.fetch_mut::<TextureDict>();
+        #[cfg(feature = "trace")]
+        debug!("Fetched texture store from ECS.");
+
+        let texture_handle = TextureHandle { handle: name.clone() };
+
+        if !texture_dict.contains_key(&texture_handle) {
+            #[cfg(feature = "trace")]
+            debug!("This is a new texture. It needs to be loaded from file and stored in the Texture Store.");
+
+            let dynamic_image = Reader::open(path)
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to open image file at path: {:?}", self.json.image_path.clone());
+
+                    ReaderFailedToOpen {
+                        path: self.json.image_path.clone(),
+                        source: e
+                    }
+                })?
+                .decode()
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to decode image at path: {:?}", self.json.image_path.clone());
+
+                    DecodeError {
+                        source: e,
+                        image_path: self.json.image_path.clone()
+                    }
                 })?;
 
-            let mut texture_dict = world.fetch_mut::<TextureDict>();
-            #[cfg(feature = "trace")]
-            debug!("Fetched texture store from ECS.");
-
-            let texture_handle = TextureHandle { handle: name.clone() };
-
-            if !texture_dict.contains_key(&texture_handle) {
-                #[cfg(feature = "trace")]
-                debug!("This is a new texture. It needs to be loaded from file and stored in the Texture Store.");
-
-                let dynamic_image = Reader::open(path)
-                    .map_err(|e| {
-                        #[cfg(feature = "trace")]
-                        error!("Failed to open image file at path: {:?}", self.json.image_path.clone());
-
-                        ReaderFailedToOpen {
-                            path: self.json.image_path.clone(),
-                            source: e
-                        }
-                    })?
-                    .decode()
-                    .map_err(|e| {
-                        #[cfg(feature = "trace")]
-                        error!("Failed to decode image at path: {:?}", self.json.image_path.clone());
-
-                        DecodeError {
-                            source: e,
-                            image_path: self.json.image_path.clone()
-                        }
-                    })?;
-
-                let rgb_image = dynamic_image
-                    .into_rgba8();
-
-                #[cfg(feature = "trace")]
-                debug!("Successfully converted image from file into RGBA8 format");
-
-                let rgb_image_rev: Vec<u8> = rgb_image.rows()
-                    // Reverse the contents of each row a.k.a mirror it
-                    // and get rid of the Rev iter layer using flat_map instead of map
-                    .flat_map(|row| {
-                        row.rev()
-                    })
-                    // Reverse all rows a.k.a flip upside down
-                    .rev()
-                    // Flat_map expects an iter as the return value and automatically flattens it
-                    // so we can use it as another way to convert a vec of pixels into the raw bytes
-                    .flat_map(|pixel| {
-                        pixel.0
-                    })
-                    .collect();
-                #[cfg(feature = "trace")]
-                debug!("Flipped and mirrored image so it is drawn properly by renderer.");
-
-                let (x, y) = rgb_image.dimensions();
-                #[cfg(feature = "trace")]
-                debug!("Image size is x: {:?}, y: {:?}", x, y);
-
-                let mut ctx = context.write()
-                    .map_err(|_| {
-                        #[cfg(feature = "trace")]
-                        error!("Failed to acquire write lock for Context");
-
-                        ContextWriteLockError
-                    })?;
-
-                let texture = LumTex::new_raw(
-                    ctx.deref_mut(),
-                    [x, y],
-                    0,
-                    TextureHandle::SAMPLER,
-                    GenMipmaps::No,
-                    &rgb_image_rev
-                )?;
-
-                #[cfg(feature = "trace")]
-                debug!("Created texture from raw image bytes. Storing in Texture Store.");
-
-                texture_dict.insert(&texture_handle, texture);
-            }
+            let rgb_image = dynamic_image
+                .into_rgba8();
 
             #[cfg(feature = "trace")]
-            debug!("Successfully created Texture. Adding to builder.");
+            debug!("Successfully converted image from file into RGBA8 format");
 
-            Ok(builder.with(texture_handle))
-        } else {
+            let rgb_image_rev: Vec<u8> = rgb_image.rows()
+                // Reverse the contents of each row a.k.a mirror it
+                // and get rid of the Rev iter layer using flat_map instead of map
+                .flat_map(|row| {
+                    row.rev()
+                })
+                // Reverse all rows a.k.a flip upside down
+                .rev()
+                // Flat_map expects an iter as the return value and automatically flattens it
+                // so we can use it as another way to convert a vec of pixels into the raw bytes
+                .flat_map(|pixel| {
+                    pixel.0
+                })
+                .collect();
             #[cfg(feature = "trace")]
-            error!("Optional Context was required for this component. Returning error.");
+            debug!("Flipped and mirrored image so it is drawn properly by renderer.");
 
-            Err(anyhow::Error::new(
-                ContextMissing {
-                    texture: self.json.clone()
-                }
-            ))
+            let (x, y) = rgb_image.dimensions();
+            #[cfg(feature = "trace")]
+            debug!("Image size is x: {:?}, y: {:?}", x, y);
+
+            let mut context = world.fetch_mut::<Context>();
+
+            let mut ctx = context.0.write()
+                .map_err(|_| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for Context");
+
+                    ContextWriteLockError
+                })?;
+
+            let texture = LumTex::new_raw(
+                ctx.deref_mut(),
+                [x, y],
+                0,
+                TextureHandle::SAMPLER,
+                GenMipmaps::No,
+                &rgb_image_rev
+            )?;
+
+            #[cfg(feature = "trace")]
+            debug!("Created texture from raw image bytes. Storing in Texture Store.");
+
+            texture_dict.insert(&texture_handle, texture);
         }
+
+        #[cfg(feature = "trace")]
+        debug!("Successfully created Texture. Adding to builder.");
+
+        Ok(builder.with(texture_handle))
     }
 
     #[cfg_attr(feature = "trace", instrument)]

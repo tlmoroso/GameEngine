@@ -16,7 +16,7 @@ pub const COMPONENTS_DIR: &str = "components/";
 
 pub trait ComponentLoader: Debug {
     fn from_json(json: JSONLoad) -> Result<Self> where Self: Sized;
-    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>, context: Option<Arc<RwLock<GL33Context>>>) -> Result<LazyBuilder<'a>>;
+    fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>) -> Result<LazyBuilder<'a>>;
     fn set_value(&mut self, new_value: JSONLoad) -> Result<()>;
     fn get_component_name(&self) -> String;
 }

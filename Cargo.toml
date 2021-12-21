@@ -24,7 +24,6 @@ tracing-bunyan-formatter = {version = "0.1.7", optional = true}
 tracing-log = {version = "0.1.1", optional = true}
 tracing-appender = {version = "0.1.2", optional = true}
 kira = "0.3.0"
-tokio = {version = "1.2.0", features = ["full"]}
 gilrs = "0.8.0"
 glfw = "0.41"
 luminance = "0.44.0"
@@ -35,4 +34,4 @@ luminance-front = "0.4.0"
 luminance-gl = "0.17.0"
 image = "0.23.14"
 glam = "0.17.1"
-crossbeam-epoch = "0.9.5"
+rayon = "1.5.1"

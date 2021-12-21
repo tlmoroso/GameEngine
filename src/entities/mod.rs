@@ -18,7 +18,7 @@ use anyhow::Result;
 #[cfg(feature="trace")]
 use tracing::{instrument, error, debug};
 use specs::world::EntitiesRes;
-use crate::loading::DrawTask;
+use crate::loading::{DrawTask, GenTask};
 use luminance_glfw::GL33Context;
 use std::borrow::BorrowMut;
 use crate::entities::EntityError::{EntityLoaderDeserializeError, EntityWorldWriteLockError, EntityFileLoadError, ComponentMuxError, EntityComponentLoaderError};
@@ -53,10 +53,10 @@ impl EntityLoader {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self)))]
-    pub fn load_entity<T: ComponentMux>(&self) -> DrawTask<Entity> {
+    pub fn load_entity<T: ComponentMux>(&self) -> GenTask<Entity> {
         let file_path = self.entity_file.clone();    // Attempt to not have self in the closure
 
-        DrawTask::new(move |(world, context)| {
+        GenTask::new(move |world| {
             let entity_json: EntityLoaderJSON = load_deserializable_from_file(&file_path, ENTITY_LOAD_ID)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -111,7 +111,7 @@ impl EntityLoader {
                         }
                     })?;
 
-                builder = loader.load_component(builder, world.clone(), Some(context.clone()))
+                builder = loader.load_component(builder, world.clone())
                     .map_err(|e| {
                         #[cfg(feature = "trace")]
                         error!("Error occurred while loading component.");

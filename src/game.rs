@@ -13,7 +13,7 @@ use tracing::{instrument, error, trace, debug};
 use crate::game::GameError::{GameInteractError, GameDrawError, GameUpdateError, GameIsFinishedError, GameWrapperLoadError, WorldReadLockError, WorldWriteLockError};
 use std::fmt::Debug;
 use crate::input::Input;
-use crate::loading::DrawTask;
+use crate::loading::GenTask;
 use luminance_glfw::GL33Context;
 use anyhow::Result;
 use std::borrow::BorrowMut;
@@ -23,21 +23,21 @@ use crate::scenes::SCENES_DIR;
 
 pub const GAME_FILE_ID: &str = "game";
 
-pub trait GameWrapper<T: Input + Debug> {
+pub trait GameWrapper<T: Input + Debug>: Send {
     fn register_components(ecs: &mut World);
     // Allow user to pre-fill World with global values here
-    fn load() -> DrawTask<SceneStack<T>>;
+    fn load() -> GenTask<SceneStack<T>>;
     // fn load_scene_stack(ecs: Arc<RwLock<World>>, window: &Window) -> Task<SceneStack<T>>;
 }
 
 pub struct Game<T: GameWrapper<U>, U: 'static + Input + Debug> {
-    scene_stack: SceneStack<U>,
+    scene_stack: RwLock<SceneStack<U>>,
     phantom_wrapper: PhantomData<T>,
 }
 
 impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
     #[cfg_attr(feature="trace", instrument(skip(ecs, context)))]
-    pub(crate) fn load(ecs: Arc<RwLock<World>>, context: Arc<RwLock<GL33Context>>) -> Result<Game<T,U>, GameError> {
+    pub(crate) fn load(ecs: Arc<RwLock<World>>) -> Result<Game<T,U>, GameError> {
         #[cfg(feature="trace")]
         debug!("ENTER: Game::load");
         T::register_components(
@@ -54,7 +54,7 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
         debug!("Components registered");
 
         let scene_stack = T::load()
-            .execute((ecs.clone(), context))
+            .execute(ecs.clone())
             .map_err(|e| { GameWrapperLoadError { source: e } })?;
         #[cfg(feature="trace")]
         debug!("SceneStack loaded from GameWrapper: {:?}", scene_stack);
@@ -68,17 +68,17 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
         #[cfg(feature="trace")]
         debug!("EXIT: MyGame::load");
         Ok(Game {
-            scene_stack,
+            scene_stack: RwLock::new(scene_stack),
             phantom_wrapper: PhantomData,
         })
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, context)))]
-    pub(crate) fn draw(&mut self, ecs: &mut World, context: &mut GL33Context) -> Result<(), GameError> {
+    pub(crate) fn draw(&mut self, ecs: Arc<RwLock<World>>) -> Result<(), GameError> {
         #[cfg(feature="trace")]
         debug!("ENTER: MyGame::draw");
 
-         self.scene_stack.draw(ecs, context)
+         self.scene_stack.draw(ecs)
              .map_err(|e| {
                  #[cfg(feature="trace")]
                  error!("ERROR: Game failed during draw function: {:?}", e);
@@ -92,7 +92,7 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub(crate) fn interact(&mut self, ecs: &mut World, input: &U) -> Result<(), GameError> {
+    pub(crate) fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &U) -> Result<(), GameError> {
         #[cfg(feature="trace")]
         debug!("ENTER: MyGame::interact");
 
@@ -110,7 +110,7 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub(crate) fn update(&mut self, ecs: &mut World) -> Result<(), GameError> {
+    pub(crate) fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<(), GameError> {
         #[cfg(feature="trace")]
         debug!("ENTER: MyGame::update");
 
@@ -128,7 +128,7 @@ impl<T: GameWrapper<U>, U: Input + Debug> Game<T,U> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub(crate) fn is_finished(&self, ecs: &mut World) -> bool {
+    pub(crate) fn is_finished(&self, ecs: Arc<RwLock<World>>) -> bool {
         #[cfg(feature = "trace")]
         trace!("ENTER: MyGame::is_finished");
 

@@ -19,7 +19,7 @@ use anyhow::Result;
 use tracing::{instrument, trace, error, debug};
 
 use crate::input::Input;
-use crate::loading::DrawTask;
+use crate::loading::{DrawTask, GenTask};
 use luminance_glfw::GL33Context;
 use crate::scenes::scene_stack::SceneStackLoaderError::{JSONDeserializeFromFileError, JSONLoadFromFileError, SceneFactoryError, SceneLoadError};
 
@@ -58,12 +58,12 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self)))]
-    pub fn load(&self) -> DrawTask<SceneStack<T>> {
+    pub fn load(&self) -> GenTask<SceneStack<T>> {
         // Attempts to not bring self into closure.
         let path = self.scene_stack_file.clone();
         let scene_factory = self.scene_factory;
 
-        let task = DrawTask::new(move |(ecs, context)| {
+        let task = GenTask::new(move |ecs| {
             let scene_stack_json: SceneStackLoaderJSON = load_deserializable_from_file(&path, SCENE_STACK_FILE_ID)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -106,7 +106,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
                     })?;
 
                 let scene = scene_loader.load_scene()
-                    .execute((ecs.clone(), context.clone()))
+                    .execute(ecs.clone())
                     .map_err(|e| {
                         #[cfg(feature = "trace")]
                         error!("An error occurred while loading the scene: ({:?})", e);
@@ -142,9 +142,13 @@ pub struct SceneStack<T: Input + Debug> {
     phantom_input: PhantomData<T>
 }
 
+unsafe impl<T: Input + Debug> Send for SceneStack<T> {}
+
+unsafe impl<T: Input + Debug> Sync for SceneStack<T> {}
+
 impl<T: Input + Debug> SceneStack<T> {
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub fn update(&mut self, ecs: &mut World) -> Result<(), SceneStackError> {
+    pub fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<(), SceneStackError> {
         return if let Some(scene) = self.stack.last_mut() {
             #[cfg(feature="trace")]
             debug!("Calling update on {}", scene.get_name());
@@ -289,9 +293,9 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs, context)))]
-    pub fn draw(&mut self, ecs: &mut World, context: &mut GL33Context) -> Result<(), SceneStackError> {
+    pub fn draw(&mut self, ecs: Arc<RwLock<World>>) -> Result<(), SceneStackError> {
         return if let Some(scene) = self.stack.last_mut() {
-            scene.draw(ecs, context)
+            scene.draw(ecs)
                 .map_err( |e| {
                     #[cfg(feature = "trace")]
                     error!("An error occurred while calling Scene::draw. Error: ({:?}). Scene: {:?}", e, scene.get_name());
@@ -315,7 +319,7 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub fn interact(&mut self, ecs: &mut World, input: &T) -> Result<(), SceneStackError> {
+    pub fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &T) -> Result<(), SceneStackError> {
         return if let Some(scene) = self.stack.last_mut() {
             scene.interact(ecs, input)
                 .map_err(|e| {
@@ -341,7 +345,7 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub fn is_finished(&self, ecs: &mut World) -> Result<bool, SceneStackError> {
+    pub fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool, SceneStackError> {
         return if let Some(scene) = self.stack.last() {
             let should_finish = scene.is_finished(ecs)
                 .map_err(|e| {

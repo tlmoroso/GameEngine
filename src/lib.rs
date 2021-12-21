@@ -14,3 +14,4 @@ pub mod log;
 pub mod graphics;
 pub mod loading;
 pub mod camera;
+pub mod threading;
