@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex, RwLock};
 use anyhow::Result;
 use image::ImageError;
 use image::io::Reader;
-use luminance::depth_test::DepthComparison;
 use luminance_front::pixel::Pixel;
-use luminance_front::texture::{GenMipmaps, MagFilter, MinFilter, Sampler, Texture as LumTex, Wrap};
+use luminance_front::texture::{MagFilter, MinFilter, Sampler, Texture as LumTex, Wrap, TexelUpload};
+use luminance_front::depth_stencil::Comparison;
 use luminance_glfw::GL33Context;
 use serde::Deserialize;
 use specs::{Builder, Component, VecStorage, World};
@@ -41,7 +41,7 @@ impl TextureHandle {
         wrap_t: Wrap::ClampToEdge,
         min_filter: MinFilter::Nearest,
         mag_filter: MagFilter::Nearest,
-        depth_comparison: Some(DepthComparison::Less)
+        depth_comparison: Some(Comparison::Less)
     };
 }
 
@@ -79,7 +79,7 @@ impl ComponentLoader for TextureLoader {
         Ok(Self{ json: texture_json })
     }
 
-    #[cfg_attr(feature = "trace", instrument(skip(builder, ecs, context)))]
+    #[cfg_attr(feature = "trace", instrument(skip(builder, ecs)))]
     fn load_component<'a>(&self, builder: LazyBuilder<'a>, ecs: Arc<RwLock<World>>) -> Result<LazyBuilder<'a>> {
         let path = PathBuf::from(self.json.image_path.clone());
 
@@ -114,7 +114,7 @@ impl ComponentLoader for TextureLoader {
             name
         };
 
-        let world = ecs.read()
+        let ecs = ecs.read()
             .map_err(|_| {
                 #[cfg(feature = "trace")]
                 error!("Failed to acquire read lock for world");
@@ -122,7 +122,7 @@ impl ComponentLoader for TextureLoader {
                 WorldReadLockError
             })?;
 
-        let mut texture_dict = world.fetch_mut::<TextureDict>();
+        let mut texture_dict = ecs.fetch_mut::<TextureDict>();
         #[cfg(feature = "trace")]
         debug!("Fetched texture store from ECS.");
 
@@ -180,7 +180,7 @@ impl ComponentLoader for TextureLoader {
             #[cfg(feature = "trace")]
             debug!("Image size is x: {:?}, y: {:?}", x, y);
 
-            let mut context = world.fetch_mut::<Context>();
+            let context = ecs.fetch::<Context>();
 
             let mut ctx = context.0.write()
                 .map_err(|_| {
@@ -193,10 +193,8 @@ impl ComponentLoader for TextureLoader {
             let texture = LumTex::new_raw(
                 ctx.deref_mut(),
                 [x, y],
-                0,
                 TextureHandle::SAMPLER,
-                GenMipmaps::No,
-                &rgb_image_rev
+                TexelUpload::base_level(&rgb_image_rev, 0)
             )?;
 
             #[cfg(feature = "trace")]

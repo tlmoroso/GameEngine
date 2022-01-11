@@ -1,11 +1,12 @@
-use luminance_front::shader::{Program, UniformInterface, TessellationStages, ProgramError};
-use crate::loading::{GenTask, DrawTask};
+use luminance_front::shader::{Program, UniformInterface, TessellationStages, ProgramError, Stage, StageType};
+use crate::loading::{GenTask};
 use crate::load::{load_deserializable_from_file, LoadError};
 use thiserror::Error;
 
 #[cfg(feature="trace")]
 use tracing::{instrument, error, debug};
-use crate::graphics::shader::ShaderLoadError::{DeserializeError, ContextWriteError, FileReadError, ShaderProgramBuildError};
+use crate::graphics::Context;
+use crate::graphics::shader::ShaderLoadError::{DeserializeError, ContextWriteError, WorldWriteError, FileReadError, ShaderProgramBuildError};
 use luminance::context::GraphicsContext;
 use std::fs::read_to_string;
 use crate::graphics::render::sprite_renderer::{DefaultSpriteShaderUniform};
@@ -43,13 +44,13 @@ impl ShaderLoader {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    pub fn load<Sem, Out, Uni>(&self) -> DrawTask<Program<Sem, Out, Uni>>
+    pub fn load<Sem, Out, Uni>(&self) -> GenTask<Program<Sem, Out, Uni>>
         where Sem: 'static + Semantics,
               Out: 'static,
               Uni: 'static + UniformInterface<luminance_front::Backend> {
         let path = self.path.clone();
 
-        DrawTask::new(move |(_ecs, context)| {
+        GenTask::new(move |ecs| {
             #[cfg(feature = "trace")]
             debug!("Loading Shader Program from file: {:?}", path.clone());
 
@@ -61,14 +62,6 @@ impl ShaderLoader {
                         source: e,
                         file_path: path.clone()
                     }
-                })?;
-
-            let mut context = context.write()
-                .map_err(|_| {
-                    #[cfg(feature = "trace")]
-                    error!("Failed to write acquire lock for context");
-
-                    ContextWriteError
                 })?;
 
             let fs = read_to_string(json.fragment.clone())
@@ -168,7 +161,26 @@ impl ShaderLoader {
             #[cfg(feature = "trace")]
             debug!("Read in Vertex Shader from file: {:?}", json.vertex.clone());
 
-            Ok(context.new_shader_program()
+            let ecs = ecs.write()
+                .map_err(|_e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for World");
+
+                    WorldWriteError
+                })?;
+
+            let context = ecs.fetch::<Context>();
+
+            let mut context = context.0
+                .write()
+                .map_err(|_e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for Context");
+
+                    ContextWriteError
+                })?;
+
+            let built_program = context.new_shader_program()
                 .from_strings(&vs, tess_stages, gs, &fs)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -182,23 +194,38 @@ impl ShaderLoader {
                         gs: json.geometry.clone(),
                         fs: json.fragment.clone()
                     }
-                })?
-                .ignore_warnings())
+                })?;
+
+            #[cfg(feature = "trace")]
+            debug!("Shader program built. Ignoring Warning from shader program: {:?}", built_program.warnings);
+
+            Ok(built_program.ignore_warnings())
         })
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    pub fn load_default() -> DrawTask<Program<(), (), DefaultSpriteShaderUniform>> {
-        DrawTask::new(|(_ecs, context)| {
-            let mut context = context.write()
+    pub fn load_default() -> GenTask<Program<(), (), DefaultSpriteShaderUniform>> {
+        GenTask::new(|ecs| {
+            let ecs = ecs.write()
                 .map_err(|_e| {
                     #[cfg(feature = "trace")]
-                    debug!("Failed to acquire write lock for context");
+                    error!("Failed to acquire write lock for World");
+
+                    WorldWriteError
+                })?;
+
+            let context = ecs.fetch::<Context>();
+
+            let mut context = context.0
+                .write()
+                .map_err(|_e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for Context");
 
                     ContextWriteError
                 })?;
 
-            Ok(context
+            let built_program = context
                 .new_shader_program()
                 .from_strings(VS, None, None, FS)
                 .map_err(|e| {
@@ -213,8 +240,12 @@ impl ShaderLoader {
                         gs: None,
                         fs: FS.to_string()
                     }
-                })?
-                .ignore_warnings())
+                })?;
+
+               #[cfg(feature = "trace")]
+               debug!("Shader program built. Ignoring Warnings from shader program: {:?}", built_program.warnings);
+
+                Ok(built_program.ignore_warnings())
         })
     }
 }
@@ -229,6 +260,8 @@ pub enum ShaderLoadError {
 
     #[error("Failed to get write lock for context")]
     ContextWriteError,
+    #[error("Failed to get write lock for World")]
+    WorldWriteError,
 
     #[error("Failed to read shader program from file: {path}")]
     FileReadError {

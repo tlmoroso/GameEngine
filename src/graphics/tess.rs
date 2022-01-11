@@ -6,13 +6,14 @@ use crate::graphics::render::sprite_renderer::SpriteRenderError;
 use luminance_front::tess::{Tess, Mode, TessError, Interleaved};
 use luminance::context::GraphicsContext;
 use thiserror::Error;
-use crate::graphics::tess::TessLoadError::{TessBuildError, DeserializeError, ContextWriteError};
+use crate::graphics::tess::TessLoadError::{TessBuildError, DeserializeError, ContextWriteError, WorldWriteLockError};
 use serde::Deserialize;
-use crate::loading::DrawTask;
+use crate::loading::GenTask;
 use crate::load::{load_deserializable_from_file, LoadError};
 use anyhow::{Error};
 use luminance::tess::TessVertexData;
 use std::fmt::Debug;
+use crate::graphics::Context;
 
 pub const TESS_LOAD_ID: &str = "tess";
 
@@ -46,10 +47,10 @@ impl TessLoader {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    pub fn load(&self) -> DrawTask<Tess<(),(),(),Interleaved>> {
+    pub fn load(&self) -> GenTask<Tess<(),(),(),Interleaved>> {
         let path = self.file_path.clone();
 
-        DrawTask::new(move |(_ecs, context)| {
+        GenTask::new(move |ecs| {
             #[cfg(feature = "trace")]
             debug!("Loading Tess from file: {:?}", path.clone());
 
@@ -63,19 +64,28 @@ impl TessLoader {
                         file_path: path.clone()
                     }
                 })?;
+
             #[cfg(feature = "trace")]
             debug!("Loaded json from file: {:?}", json.clone());
 
-            let mut context = context.write()
-                .map_err(|_| {
+            let ecs = ecs.write()
+                .map_err(|_e| {
                     #[cfg(feature = "trace")]
-                    error!("Failed to acquire write lock for context");
+                    error!("Failed to acquire write lock for World");
+
+                    WorldWriteLockError
+                })?;
+
+            let context = ecs.fetch::<Context>();
+
+            let mut context = context.0
+                .write()
+                .map_err(|_e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for Context");
 
                     ContextWriteError
                 })?;
-
-            #[cfg(feature = "trace")]
-            debug!("Tess has interleaved storage.");
 
             let mut tess_builder = context.new_tess();
             #[cfg(feature = "trace")]
@@ -114,12 +124,23 @@ impl TessLoader {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    pub fn load_default() -> DrawTask<Tess<(),(),(),Interleaved>> {
-        DrawTask::new(|(_ecs, context)| {
+    pub fn load_default() -> GenTask<Tess<(),(),(),Interleaved>> {
+        GenTask::new(|ecs| {
             #[cfg(feature = "trace")]
             debug!("Loading Default Tess");
 
-            let mut context = context.write()
+            let ecs = ecs.write()
+                .map_err(|_e| {
+                    #[cfg(feature = "trace")]
+                    error!("Failed to acquire write lock for World");
+
+                    WorldWriteLockError
+                })?;
+
+            let context = ecs.fetch::<Context>();
+
+            let mut context = context.0
+                .write()
                 .map_err(|_e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to acquire write lock for Context");
@@ -156,6 +177,8 @@ pub enum TessLoadError {
 
     #[error("Failed to acquire write lock for Context")]
     ContextWriteError,
+    #[error("Failed to acquire write lock for Context")]
+    WorldWriteLockError,
 }
 
 #[derive(Deserialize,Debug,Clone)]

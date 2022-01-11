@@ -17,7 +17,7 @@ use luminance_front::{
     shading_gate::ShadingGate,
     pixel::{Pixel, Unsigned},
     context::GraphicsContext,
-
+    depth_stencil::Comparison
 };
 use luminance_derive::UniformInterface;
 use luminance::backend::shader::Shader;
@@ -38,18 +38,16 @@ use luminance_glfw::GL33Context;
 use glam::Mat4;
 use std::error::Error;
 use luminance_front::shader::{ProgramError, UniformInterface};
-use luminance_front::depth_test::DepthComparison::Always;
 
 #[cfg(feature = "trace")]
 use tracing::{debug, error, instrument};
 
-use crate::loading::DrawTask;
+use crate::loading::GenTask;
 use luminance_front::vertex::Semantics;
 use luminance::tess::{TessVertexData, TessIndex};
 use crate::load::{load_deserializable_from_file, LoadError};
 use crate::graphics::tess::TessLoader;
 use luminance::blending::BlendingMode;
-use luminance::depth_test::{DepthComparison, DepthWrite};
 use luminance::face_culling::FaceCulling;
 use luminance::scissor::ScissorRegion;
 use crate::graphics::render::sprite_renderer::SpriteRendererLoadError::{DeserializeError, TessLoadError, ShaderLoadError};
@@ -59,11 +57,12 @@ use std::marker::PhantomData;
 use crate::graphics::render::deserializations::{RenderStateDef, RENDER_STATE_LOAD_ID};
 use crate::camera::Camera;
 use std::sync::{Arc, RwLock};
+use luminance_front::shader::types::{Mat44};
 
 #[cfg_attr(feature = "trace", instrument)]
 pub fn default_sprite_render_state() -> RenderState {
     RenderState::default()
-        .set_depth_test(Some(Always))
+        .set_depth_test(Some(Comparison::Always))
         .set_blending_separate(
             Blending {
                 equation: Equation::Additive,
@@ -81,11 +80,11 @@ pub fn default_sprite_render_state() -> RenderState {
 #[derive(Debug, UniformInterface)]
 pub struct DefaultSpriteShaderUniform {
     /// PROJECTION matrix in MVP
-    projection: Uniform<[[f32; 4]; 4]>,
+    projection: Uniform<Mat44<f32>>,
     /// VIEW matrix in MVP
-    view: Uniform<[[f32; 4]; 4]>,
+    view: Uniform<Mat44<f32>>,
     /// MODEL matrix in MVP
-    model: Uniform<[[f32; 4]; 4]>,
+    model: Uniform<Mat44<f32>>,
     /// Texture for the texture.
     tex: Uniform<TextureBinding<Dim2, Unsigned>>,
 }
@@ -110,10 +109,10 @@ impl SpriteRendererLoader {
         }
     }
 
-    pub fn load(&self) -> DrawTask<SpriteRenderer> {
+    pub fn load(&self) -> GenTask<SpriteRenderer> {
         let path = self.path.clone();
 
-        DrawTask::new(move |(ecs, context)| {
+        GenTask::new(move |ecs| {
             #[cfg(feature = "trace")]
             debug!("Loading Sprite Renderer from file: {:?}", path.clone());
 
@@ -147,7 +146,7 @@ impl SpriteRendererLoader {
 
             let tess = TessLoader::new(json.tess_path.clone())
                 .load()
-                .execute((ecs.clone(), context.clone()))
+                .execute(ecs.clone())
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to load Tess from file: {:?}", json.tess_path.clone());
@@ -162,7 +161,7 @@ impl SpriteRendererLoader {
 
             let shader = ShaderLoader::new(json.shader_path.clone())
                 .load()
-                .execute((ecs, context))
+                .execute(ecs)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to load shader from file: {:?}", json.shader_path);
@@ -183,7 +182,7 @@ impl SpriteRendererLoader {
         })
     }
 
-    pub fn load_default() -> DrawTask<SpriteRenderer> {
+    pub fn load_default() -> GenTask<SpriteRenderer> {
         let render_state = default_sprite_render_state();
         TessLoader::load_default()
             .join(ShaderLoader::load_default(), |tess_and_shader| tess_and_shader )
@@ -239,7 +238,7 @@ impl Renderer for SpriteRenderer {
     type S = Self;
 
     #[cfg_attr(feature = "trace", instrument)]
-    fn load(path: String) -> DrawTask<Self> {
+    fn load(path: String) -> GenTask<Self> {
         let loader = SpriteRendererLoader::new(path);
 
         loader.load()
@@ -265,10 +264,22 @@ impl Renderer for SpriteRenderer {
             #[cfg(feature = "trace")]
             debug!("Getting all entities with a texture and transform component to draw. Also fetching TextureDict.");
 
-            let camera = camera.as_mut().ok_or(CameraDNE)?;
+            let camera = camera.as_mut().ok_or_else(|| {
+                #[cfg(feature = "trace")]
+                error!("Failed to get camera from World.");
 
-            iface.set(&uni.projection, proj_matrix.to_cols_array_2d());
-            iface.set(&uni.view, camera.view().to_cols_array_2d());
+                CameraDNE
+            })?;
+
+            iface.set(
+                &uni.projection,
+                Mat44::new(proj_matrix.to_cols_array_2d())
+            );
+            iface.set(
+                &uni.view,
+                Mat44::new(camera.view()
+                        .to_cols_array_2d())
+            );
             #[cfg(feature = "trace")]
             debug!("Setting uniform values for projection and view matrices using ProgramInterface");
 
@@ -291,9 +302,19 @@ impl Renderer for SpriteRenderer {
                             }
                         })?;
 
-                    iface.set(&uni.tex, bound_tex.binding());
-                    let model = transform.to_model();
-                    iface.set(&uni.model, model.to_cols_array_2d());
+                    iface.set(
+                        &uni.tex,
+                        bound_tex.binding()
+                    );
+
+                    iface.set(
+                        &uni.model,
+                        Mat44::new(
+                            transform
+                                .to_model()
+                                .to_cols_array_2d()
+                        )
+                    );
                     #[cfg(feature = "trace")]
                     debug!("Successfully bound texture. Setting texture and model matrix for uniform.");
 

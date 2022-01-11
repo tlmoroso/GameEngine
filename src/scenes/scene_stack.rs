@@ -1,5 +1,5 @@
 use crate::scenes::{Scene, SceneLoader};
-use crate::scenes::scene_stack::SceneStackError::{SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError, SceneStackIsFinishedError, SceneStackDeserializationError, SceneStackFactoryError};
+use crate::scenes::scene_stack::SceneStackError::{SceneStackEmptyError, SceneStackPopError, SceneStackSwapError, SceneStackReplaceError, SceneStackClearError, SceneStackUpdateError, SceneStackDrawError, SceneStackInteractError, SceneStackIsFinishedError, SceneStackDeserializationError, SceneStackFactoryError, StackReadLockError, StackWriteLockError};
 use crate::load::{load_json, JSONLoad, LoadError, load_deserializable_from_file};
 
 use specs::World;
@@ -127,7 +127,7 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
             debug!("Returning SceneStack from Task");
 
             Ok(SceneStack {
-                stack: scene_vec,
+                stack: RwLock::new(scene_vec),
                 phantom_input: PhantomData::default()
             })
         });
@@ -138,8 +138,8 @@ impl<T: 'static + Input + Debug> SceneStackLoader<T> {
 
 #[derive(Debug)]
 pub struct SceneStack<T: Input + Debug> {
-    pub stack: Vec<Box<dyn Scene<T>>>,
-    phantom_input: PhantomData<T>
+    pub stack: RwLock<Vec<Box<dyn Scene<T>>>>,
+    pub phantom_input: PhantomData<T>
 }
 
 unsafe impl<T: Input + Debug> Send for SceneStack<T> {}
@@ -148,12 +148,22 @@ unsafe impl<T: Input + Debug> Sync for SceneStack<T> {}
 
 impl<T: Input + Debug> SceneStack<T> {
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<(), SceneStackError> {
-        return if let Some(scene) = self.stack.last_mut() {
-            #[cfg(feature="trace")]
+    pub fn update(&self, ecs: Arc<RwLock<World>>) -> Result<(), SceneStackError> {
+        let mut transition = SceneTransition::NONE;
+
+        let stack = self.stack.read()
+            .map_err(|_e| {
+                #[cfg(feature="trace")]
+                error!("Failed to acquire read lock for stack while updating scene.");
+
+                StackReadLockError
+            })?;
+
+        if let Some(scene) = stack.last() {
+            #[cfg(feature = "trace")]
             debug!("Calling update on {}", scene.get_name());
 
-            let transition = scene.update(ecs)
+            transition = scene.update(ecs)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
                     error!("An occurred while calling update on scene: {:?}", scene.get_name());
@@ -164,137 +174,150 @@ impl<T: Input + Debug> SceneStack<T> {
                     }
                 })?;
 
-            #[cfg(feature="trace")]
+            #[cfg(feature = "trace")]
             trace!("Scene returned: {:?}", transition);
-
-            match transition {
-                SceneTransition::POP(quantity) => {
-                    for _i in 0..quantity {
-                        let _scene = self.stack
-                            .pop()
-                            .ok_or_else(
-                                || {
-                                    #[cfg(feature="trace")]
-                                    error!("Attempted to pop: {} scenes. More scenes than available: ({}). Failed on iteration: {}", quantity, self.stack.len(), _i);
-
-                                    SceneStackPopError {
-                                        num_scenes: self.stack.len(),
-                                        pop_amount: quantity
-                                    }
-                                }
-                            )?;
-                        #[cfg(feature="trace")]
-                        debug!("Popped scene: {}", _scene.get_name());
-                    }
-                    #[cfg(feature="trace")]
-                    debug!("{} scenes were popped", quantity)
-                },
-                SceneTransition::PUSH(new_scene) => {
-                    #[cfg(feature="trace")]
-                    debug!("Pushed new scene: {}", new_scene.get_name());
-
-                    self.stack.push(new_scene);
-                },
-                SceneTransition::SWAP(scene_1, scene_2) => {
-                    if scene_1 == scene_2 {
-                        #[cfg(feature="trace")]
-                        debug!("Swap unnecessary because indices both equalled: {}", scene_1);
-                    } else if scene_1 >= self.stack.len() {
-                        #[cfg(feature="trace")]
-                        error!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, self.stack.len());
-
-                        return Err( SceneStackSwapError {
-                            bad_index: scene_1,
-                            length: self.stack.len()
-                        })
-                    } else if scene_2 >= self.stack.len() {
-                        #[cfg(feature="trace")]
-                        error!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, self.stack.len());
-
-                        return Err( SceneStackSwapError {
-                            bad_index: scene_2,
-                            length: self.stack.len()
-                        })
-                    } else {
-                        let max = max(scene_1, scene_2);
-                        let min = min(scene_1, scene_2);
-                        let max_scene = self.stack.remove(max);
-                        let _max_name = max_scene.get_name();
-
-                        self.stack.insert(min, max_scene);
-
-                        let min_scene = self.stack.remove(min + 1);
-                        let _min_name = min_scene.get_name();
-                        self.stack.insert(max, min_scene);
-
-                        #[cfg(feature="trace")]
-                        debug!("Swapped stack positions of {} (index: {}) and {} (index: {})", _max_name, max, _min_name, min);
-                    }
-                },
-                SceneTransition::REPLACE(index, new_scene) => {
-                    if index >= self.stack.len() {
-                        return Err( SceneStackReplaceError {
-                                bad_index: index,
-                                length: self.stack.len()
-                            })
-                    } else {
-                        let _new_scene_name = new_scene.get_name();
-                        self.stack.insert(index, new_scene);
-                        let _deleted_scene = self.stack.remove(index + 1);
-
-                        #[cfg(feature="trace")]
-                        debug!("Replaced: {:#?} with {:#?}", _deleted_scene.get_name(), _new_scene_name);
-                    }
-                },
-                SceneTransition::CLEAR => {
-                    let stack_height = self.stack.len();
-                    // Only call pop length - 1 times so one scene is left.
-                    for i in 0..stack_height - 1 {
-                       let _deleted_scene = self.stack
-                           .pop()
-                           .ok_or_else(
-                               || {
-                                   #[cfg(feature="trace")]
-                                   error!("Attempted to pop scene but received None instead. Iteration: {}. Index: {}. Original length: {}.", i, stack_height - 1 - i, stack_height);
-
-                                   SceneStackClearError {
-                                       bad_index: i,
-                                       original_length: stack_height,
-                                       current_length: self.stack.len()
-                                   }
-                               }
-                           )?;
-
-                       #[cfg(feature="trace")]
-                       debug!("Clearing stack... Deleted: {} ({}/{})", _deleted_scene.get_name(), i + 1, stack_height - 1);
-                    }
-                    let _remaining_scene = self.stack
-                        .first()
-                        .ok_or(
-                            SceneStackEmptyError {}
-                        )?;
-
-                    #[cfg(feature="trace")]
-                    debug!("Cleared full scene stack except for bottom scene: {}", _remaining_scene.get_name())
-                },
-                SceneTransition::NONE => {
-                    #[cfg(feature="trace")]
-                    debug!("No scene transition action was performed. Current scene: {}", scene.get_name())
-                }
-            };
-
-            anyhow::Result::Ok(())
         } else {
             #[cfg(feature="trace")]
             error!("SceneStack was empty during update call");
 
-            Err( SceneStackEmptyError {})
+            return Err(SceneStackEmptyError {});
         }
+
+        drop(stack);
+        #[cfg(feature = "trace")]
+        debug!("Dropped read lock guard for stack.");
+
+
+        let mut stack = self.stack.write()
+            .map_err(|_e| {
+                #[cfg(feature="trace")]
+                error!("Failed to acquire write lock for stack while updating scene stack.");
+
+                StackWriteLockError
+            })?;
+
+        #[cfg(feature = "trace")]
+        debug!("Acquired write lock guard for stack.");
+
+        match transition {
+            SceneTransition::POP(quantity) => {
+                for _i in 0..quantity {
+                    let _scene = stack
+                        .pop()
+                        .ok_or_else(
+                            || {
+                                #[cfg(feature="trace")]
+                                error!("Attempted to pop: {} scenes. More scenes than available: ({}). Failed on iteration: {}", quantity, stack.len(), _i);
+
+                                SceneStackPopError {
+                                    num_scenes: stack.len(),
+                                    pop_amount: quantity
+                                }
+                            }
+                        )?;
+                    #[cfg(feature="trace")]
+                    debug!("Popped scene: {}", _scene.get_name());
+                }
+                #[cfg(feature="trace")]
+                debug!("{} scenes were popped", quantity)
+            },
+            SceneTransition::PUSH(new_scene) => {
+                #[cfg(feature="trace")]
+                debug!("Pushed new scene: {}", new_scene.get_name());
+
+                stack.push(new_scene);
+            },
+            SceneTransition::SWAP(scene_1, scene_2) => {
+                if scene_1 == scene_2 {
+                    #[cfg(feature="trace")]
+                    debug!("Swap unnecessary because indices both equalled: {}", scene_1);
+                } else if scene_1 >= stack.len() {
+                    #[cfg(feature="trace")]
+                    error!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, stack.len());
+
+                    return Err( SceneStackSwapError {
+                        bad_index: scene_1,
+                        length: stack.len()
+                    })
+                } else if scene_2 >= stack.len() {
+                    #[cfg(feature="trace")]
+                    error!("Invalid indices: ({}, {}) given for swap. Max index is: {}", scene_1, scene_2, stack.len());
+
+                    return Err( SceneStackSwapError {
+                        bad_index: scene_2,
+                        length: stack.len()
+                    })
+                } else {
+                    let max = max(scene_1, scene_2);
+                    let min = min(scene_1, scene_2);
+                    let max_scene = stack.remove(max);
+                    let _max_name = max_scene.get_name();
+
+                    stack.insert(min, max_scene);
+
+                    let min_scene = stack.remove(min + 1);
+                    let _min_name = min_scene.get_name();
+                    stack.insert(max, min_scene);
+
+                    #[cfg(feature="trace")]
+                    debug!("Swapped stack positions of {} (index: {}) and {} (index: {})", _max_name, max, _min_name, min);
+                }
+            },
+            SceneTransition::REPLACE(index, new_scene) => {
+                if index >= stack.len() {
+                    return Err( SceneStackReplaceError {
+                            bad_index: index,
+                            length: stack.len()
+                        })
+                } else {
+                    let _new_scene_name = new_scene.get_name();
+                    stack.insert(index, new_scene);
+                    let _deleted_scene = stack.remove(index + 1);
+
+                    #[cfg(feature="trace")]
+                    debug!("Replaced: {:#?} with {:#?}", _deleted_scene.get_name(), _new_scene_name);
+                }
+            },
+            SceneTransition::CLEAR => {
+                let stack_height = stack.len();
+                // Only call pop length - 1 times so one scene is left.
+                for i in 0..stack_height - 1 {
+                   let _deleted_scene = stack.pop()
+                       .ok_or_else(
+                           || {
+                               #[cfg(feature="trace")]
+                               error!("Attempted to pop scene but received None instead. Iteration: {}. Index: {}. Original length: {}.", i, stack_height - 1 - i, stack_height);
+
+                               SceneStackClearError {
+                                   bad_index: i,
+                                   original_length: stack_height,
+                                   current_length: stack.len()
+                               }
+                           }
+                       )?;
+
+                   #[cfg(feature="trace")]
+                   debug!("Clearing stack... Deleted: {} ({}/{})", _deleted_scene.get_name(), i + 1, stack_height - 1);
+                }
+                let _remaining_scene = stack.first().ok_or(SceneStackEmptyError {})?;
+
+                #[cfg(feature="trace")]
+                debug!("Cleared full scene stack except for bottom scene: {}", _remaining_scene.get_name())
+            },
+            SceneTransition::NONE => {
+                let _scene = stack.last().ok_or(SceneStackEmptyError {})?;
+
+                #[cfg(feature="trace")]
+                debug!("No scene transition action was performed. Current scene: {}", _scene.get_name())
+            }
+        };
+
+        anyhow::Result::Ok(())
     }
 
-    #[cfg_attr(feature="trace", instrument(skip(self, ecs, context)))]
-    pub fn draw(&mut self, ecs: Arc<RwLock<World>>) -> Result<(), SceneStackError> {
-        return if let Some(scene) = self.stack.last_mut() {
+    #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
+    pub fn draw(&self, ecs: Arc<RwLock<World>>) -> Result<(), SceneStackError> {
+        return if let Some(scene) = self.stack.read().map_err(|_e| StackReadLockError)?.last() {
             scene.draw(ecs)
                 .map_err( |e| {
                     #[cfg(feature = "trace")]
@@ -319,8 +342,8 @@ impl<T: Input + Debug> SceneStack<T> {
     }
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
-    pub fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &T) -> Result<(), SceneStackError> {
-        return if let Some(scene) = self.stack.last_mut() {
+    pub fn interact(&self, ecs: Arc<RwLock<World>>, input: &T) -> Result<(), SceneStackError> {
+        return if let Some(scene) = self.stack.read().map_err(|_e| StackReadLockError )?.last() {
             scene.interact(ecs, input)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -346,7 +369,7 @@ impl<T: Input + Debug> SceneStack<T> {
 
     #[cfg_attr(feature="trace", instrument(skip(self, ecs)))]
     pub fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool, SceneStackError> {
-        return if let Some(scene) = self.stack.last() {
+        return if let Some(scene) = self.stack.read().map_err(|_e| StackReadLockError)?.last() {
             let should_finish = scene.is_finished(ecs)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -454,5 +477,9 @@ pub enum SceneStackError {
     SceneStackIsFinishedError {
         scene_name: String,
         source: anyhow::Error
-    }
+    },
+    #[error("Failed to acquire stack's read lock.")]
+    StackReadLockError,
+    #[error("Failed to acquire stack's write lock.")]
+    StackWriteLockError,
 }

@@ -7,7 +7,7 @@ use serde::Deserialize;
 #[cfg(feature = "trace")]
 use tracing::{debug, error, instrument};
 
-use crate::loading::{DrawTask, Task};
+use crate::loading::{GenTask, Task};
 use crate::load::{load_deserializable_from_file, LoadError};
 use crate::camera::orthographic_camera::OrthographicCameraErrors::DeserializeError;
 
@@ -38,7 +38,7 @@ impl Default for CameraValues {
 impl Camera for OrthographicCamera {
 
     #[cfg_attr(feature = "trace", instrument)]
-    fn view(&mut self) -> Mat4 {
+    fn view(&self) -> Mat4 {
         let mut vars = self.0.write()
             .expect("Failed to acquire write lock for camera");
 
@@ -65,7 +65,7 @@ impl Camera for OrthographicCamera {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    fn set_position(&mut self, new_pos: Vec3) {
+    fn set_position(&self, new_pos: Vec3) {
         let mut vars = self.0.write()
             .expect("Failed to acquire write lock for camera");
         vars.position = new_pos;
@@ -73,7 +73,7 @@ impl Camera for OrthographicCamera {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    fn translate_position(&mut self, translation: Mat4) {
+    fn translate_position(&self, translation: Mat4) {
         let mut vars = self.0.write()
             .expect("Failed to acquire write lock for camera");
         vars.position = translation.transform_point3(vars.position);
@@ -88,7 +88,7 @@ impl Camera for OrthographicCamera {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    fn set_target(&mut self, new_target: Vec3) {
+    fn set_target(&self, new_target: Vec3) {
         let mut vars = self.0.write()
             .expect("Failed to acquire write lock for camera");
         vars.target = new_target;
@@ -96,7 +96,7 @@ impl Camera for OrthographicCamera {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    fn translate_target(&mut self, translation: Mat4) {
+    fn translate_target(&self, translation: Mat4) {
         let mut vars = self.0.write()
             .expect("Failed to acquire write lock for camera");
         vars.target = translation.transform_point3(vars.target);
@@ -111,7 +111,7 @@ impl Camera for OrthographicCamera {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    fn set_up_vector(&mut self, new_vec: Vec3) {
+    fn set_up_vector(&self, new_vec: Vec3) {
         let mut vars = self.0.write()
             .expect("Failed to acquire write lock for camera");
         vars.up_vec = new_vec;
@@ -146,7 +146,7 @@ impl OrthographicCameraLoader {
     }
 
     #[cfg_attr(feature = "trace", instrument)]
-    pub fn load(&self) -> DrawTask<OrthographicCamera> {
+    pub fn load(&self) -> GenTask<OrthographicCamera> {
         let path = self.path.clone();
         Task::new(move |_| {
             let json: OrthographicCameraJSON = load_deserializable_from_file(&path, ORTHOGRAPHIC_CAMERA_LOAD_ID)

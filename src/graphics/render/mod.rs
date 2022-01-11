@@ -11,7 +11,7 @@ use glam::Mat4;
 use specs::World;
 use crate::graphics::render::sprite_renderer::SpriteRenderError;
 use luminance_front::context::GraphicsContext;
-use crate::loading::DrawTask;
+use crate::loading::GenTask;
 
 pub mod sprite_renderer;
 pub(crate) mod deserializations;
@@ -25,7 +25,7 @@ pub trait ShaderTypes {
 pub trait Renderer {
     type S: ShaderTypes;
 
-    fn load(path: String) -> DrawTask<Self> where Self: Sized;
+    fn load(path: String) -> GenTask<Self> where Self: Sized;
 
     fn render(
         &mut self,

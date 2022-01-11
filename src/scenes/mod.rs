@@ -26,11 +26,11 @@ pub struct SceneLoaderJSON {
     pub scene_values: Value
 }
 
-pub trait Scene<T: Input + Debug>: Debug {
+pub trait Scene<T: Input + Debug>: Debug + Send + Sync {
     // Instance Methods
-    fn update(&mut self, ecs: Arc<RwLock<World>>) -> Result<SceneTransition<T>>;
-    fn draw(&mut self, ecs: Arc<RwLock<World>>) -> Result<()>;
-    fn interact(&mut self, ecs: Arc<RwLock<World>>, input: &T) -> Result<()>;
+    fn update(&self, ecs: Arc<RwLock<World>>) -> Result<SceneTransition<T>>;
+    fn draw(&self, ecs: Arc<RwLock<World>>) -> Result<()>;
+    fn interact(&self, ecs: Arc<RwLock<World>>, input: &T) -> Result<()>;
     fn get_name(&self) -> String;
     fn is_finished(&self, ecs: Arc<RwLock<World>>) -> Result<bool>;
 }

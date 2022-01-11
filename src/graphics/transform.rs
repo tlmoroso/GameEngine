@@ -8,24 +8,26 @@ use std::sync::{Arc, Mutex, RwLock};
 use luminance_glfw::GL33Context;
 use anyhow::Error;
 use thiserror::Error;
+use atomic_float::AtomicF32;
 
 #[cfg(feature = "trace")]
 use tracing::{debug, error, instrument};
 use crate::graphics::transform::TransformLoaderError::{DeserializeError, LoadTypeIDError};
+use std::sync::atomic::Ordering::Relaxed;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct Transform {
-    pub translation: Vec2,
-    pub scale: Vec2,
-    pub rotation: f32
+    pub translation: [AtomicF32; 2],
+    pub scale: [AtomicF32; 2],
+    pub rotation: AtomicF32
 }
 
 impl Default for Transform {
     fn default() -> Self {
         Self {
-            translation: Vec2::ZERO,
-            scale: Vec2::ZERO,
-            rotation: 0.0
+            translation: [AtomicF32::new(0.0), AtomicF32::new(0.0)],
+            scale: [AtomicF32::new(0.0), AtomicF32::new(0.0)],
+            rotation: AtomicF32::new(0.0)
         }
     }
 }
@@ -35,10 +37,16 @@ impl Component for Transform { type Storage = VecStorage<Self>; }
 impl Transform {
     #[cfg_attr(feature = "trace", instrument)]
     pub fn to_model(&self) -> Mat4 {
+        let scale = Vec2::new(self.scale[0].load(Relaxed), self.scale[1].load(Relaxed))
+            .extend(0.0);
+
+        let translation = Vec2::new(self.translation[0].load(Relaxed), self.translation[1].load(Relaxed))
+            .extend(0.0);
+
         let model = Mat4::from_scale_rotation_translation(
-            self.scale.extend(0.0),
-            Quat::from_rotation_z(self.rotation),
-            self.translation.extend(0.0)
+            scale,
+            Quat::from_rotation_z(self.rotation.load(Relaxed)),
+            translation
         );
         #[cfg(feature = "trace")]
         debug!("Created model matrix for entity from transform component: {:?}", model);
@@ -83,9 +91,9 @@ impl ComponentLoader for TransformLoader {
     #[cfg_attr(feature = "trace", instrument(skip(builder, _ecs)))]
     fn load_component<'a>(&self, builder: LazyBuilder<'a>, _ecs: Arc<RwLock<World>>) -> anyhow::Result<LazyBuilder<'a>> {
         let transform = Transform {
-            translation: Vec2::from(self.json.translation),
-            scale: Vec2::from(self.json.scale),
-            rotation: self.json.rotation
+            translation: [AtomicF32::new(self.json.translation[0]), AtomicF32::new(self.json.translation[1])],
+            scale: [AtomicF32::new(self.json.scale[0]), AtomicF32::new(self.json.scale[1])],
+            rotation: AtomicF32::new(self.json.rotation)
         };
 
         #[cfg(feature = "trace")]

@@ -89,7 +89,7 @@ pub fn load_json(file_path: &str) -> Result<JSONLoad, LoadError> {
     return load_json;
 }
 
-#[cfg_attr(feature="trace", instrument(skip(ecs, context)))]
+#[cfg_attr(feature="trace", instrument(skip(ecs)))]
 pub fn create_entity_vec<T: 'static + ComponentMux>(entity_paths: &Vec<String>, ecs: Arc<RwLock<World>>) -> Result<Vec<Entity>, LoadError> {
     let mut entity_vec = Vec::new();
 

@@ -8,22 +8,23 @@ use crate::load::{LoadError, load_deserializable_from_file};
 use serde::Deserialize;
 
 use thiserror::Error;
-use crate::loading::DrawTask;
+use crate::loading::{DrawTask, GenTask};
 use std::path::Path;
 use luminance_front::pixel::{Pixel, RGBA8UI};
-use luminance_front::texture::{Texture, Sampler, Wrap, MinFilter, MagFilter, GenMipmaps, Dim2};
+use luminance_front::texture::{Texture, Sampler, Wrap, MinFilter, MagFilter, Dim2, TexelUpload};
 use luminance_glfw::GL33Context;
 use luminance_front::context::GraphicsContext;
+use luminance_front::depth_stencil::Comparison;
 use anyhow::Result;
 use image::io::Reader;
-use luminance_front::depth_test::DepthComparison;
 use crate::graphics::texture::TextureHandle;
-use crate::globals::texture_dict::TextureDictError::{PathConversionFailed, RGB8ConversionFailed, WorldWriteLockError, TextureDictFileLoadError};
+use crate::globals::texture_dict::TextureDictError::*;
 use luminance::pixel::RGB8UI;
 use specs::World;
 use std::borrow::BorrowMut;
 use std::ops::DerefMut;
 use image::Pixels;
+use crate::graphics::Context;
 
 pub const TEXTURE_DICT_LOAD_ID: &str = "texture_dict";
 
@@ -52,7 +53,7 @@ impl TextureDictLoader {
         wrap_t: Wrap::ClampToEdge,
         min_filter: MinFilter::Nearest,
         mag_filter: MagFilter::Nearest,
-        depth_comparison: Some(DepthComparison::Less)
+        depth_comparison: Some(Comparison::Less)
     };
 
     #[cfg_attr(feature="trace", instrument)]
@@ -63,10 +64,10 @@ impl TextureDictLoader {
     }
 
     #[cfg_attr(feature="trace", instrument)]
-    pub fn load(self) -> DrawTask<TextureDict> {
+    pub fn load(self) -> GenTask<TextureDict> {
         let path = self.path.clone();
 
-        DrawTask::new(move |(_, context)| {
+        GenTask::new(move |ecs| {
             let json: TextureDictJSON = load_deserializable_from_file(&path, TEXTURE_DICT_LOAD_ID)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -83,12 +84,17 @@ impl TextureDictLoader {
 
             let mut texture_dict = HashMap::new();
 
-            let mut ctx = context.write()
-                .map_err(|_e| {
+            let ecs = ecs.read()
+                .map_err(|e| WorldReadLockError)?;
+
+            let context = ecs.fetch::<Context>();
+
+            let mut context = context.0.write()
+                .map_err(|_| {
                     #[cfg(feature = "trace")]
                     error!("Failed to acquire write lock for World");
 
-                    WorldWriteLockError
+                    ContextWriteLockError
                 })?;
 
             for (image_name, image_path) in json.textures {
@@ -126,12 +132,10 @@ impl TextureDictLoader {
                 debug!("Image dimensions: ({:?}, {:?})", x, y);
 
                 let texture = Texture::new_raw(
-                    ctx.deref_mut(),
+                    context.deref_mut(),
                     [x, y],
-                    0,
                     Self::SAMPLER,
-                    GenMipmaps::Yes,
-                    &rgb_image_rev
+                    TexelUpload::base_level(&rgb_image_rev, 0),
                 ).map_err(|e| {
                     #[cfg(feature = "trace")]
                     error!("Failed to create texture from image. Name: ({:?}). Path: {:?}", image_name.clone(), image_path.clone());
@@ -195,5 +199,11 @@ pub enum TextureDictError {
         image_path: String
     },
     #[error("Failed to acquire write lock for World")]
-    WorldWriteLockError
+    WorldWriteLockError,
+    #[error("Failed to acquire read lock for World")]
+    WorldReadLockError,
+    #[error("Failed to acquire write lock for Context")]
+    ContextWriteLockError,
+    #[error("Failed to acquire read lock for Context")]
+    ContextReadLockError,
 }

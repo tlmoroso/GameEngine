@@ -56,7 +56,7 @@ impl EntityLoader {
     pub fn load_entity<T: ComponentMux>(&self) -> GenTask<Entity> {
         let file_path = self.entity_file.clone();    // Attempt to not have self in the closure
 
-        GenTask::new(move |world| {
+        GenTask::new(move |ecs| {
             let entity_json: EntityLoaderJSON = load_deserializable_from_file(&file_path, ENTITY_LOAD_ID)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
@@ -71,7 +71,7 @@ impl EntityLoader {
             #[cfg(feature = "trace")]
             debug!("Entity JSON value loaded from file: {:?}", file_path.clone());
 
-            let ecs = world.read()
+            let ecs_read = ecs.read()
                 .map_err(|_e| {
                     #[cfg(feature = "trace")]
                     debug!("Error acquiring write lock for World");
@@ -79,8 +79,8 @@ impl EntityLoader {
                     EntityWorldWriteLockError
                 })?;
 
-            let lazy_update = ecs.fetch::<LazyUpdate>();
-            let entities = ecs.fetch::<EntitiesRes>();
+            let lazy_update = ecs_read.fetch::<LazyUpdate>();
+            let entities = ecs_read.fetch::<EntitiesRes>();
 
             let mut builder = lazy_update.create_entity(&entities);
 
@@ -111,7 +111,7 @@ impl EntityLoader {
                         }
                     })?;
 
-                builder = loader.load_component(builder, world.clone())
+                builder = loader.load_component(builder, ecs.clone())
                     .map_err(|e| {
                         #[cfg(feature = "trace")]
                         error!("Error occurred while loading component.");
